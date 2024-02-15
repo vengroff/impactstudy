@@ -18,7 +18,7 @@ class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
 
         y = target_generator.f_prime(x, c)
 
-        self.assertEqual((n, ), y.shape)
+        self.assertEqual((n,), y.shape)
 
         # The noise gets smoothed out.
         self.assertAlmostEqual(0.0, y.mean(), delta=0.0002)
@@ -41,7 +41,9 @@ class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
         a = np.array([-1.0, 246.997, 3.0])
         sigma = 0.2
 
-        target_generators = [ise.LinearNormalTargetGenerator(a, sigma, seed=seed) for seed in seeds]
+        target_generators = [
+            ise.LinearNormalTargetGenerator(a, sigma, seed=seed) for seed in seeds
+        ]
 
         ys = [target_generator.f_prime(x, c) for target_generator in target_generators]
 
@@ -69,5 +71,5 @@ class UniformFeatureGeneratorTestCase(unittest.TestCase):
         self.assertTrue((c < 1.0).all())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
