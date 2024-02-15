@@ -72,7 +72,7 @@ jobs:
         id: logVersions
         run: |
           source .venv/bin/activate
-          python -c "import censusdis; print(f'censusdis version: {censusdis.version}')"
+          python -c "import impactstudy; print(f'impactstudy version: {impactstudy.version}')"
       #----------------------------------------------
       #              run test suite
       #----------------------------------------------
