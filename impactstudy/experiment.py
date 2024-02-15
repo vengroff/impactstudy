@@ -7,6 +7,7 @@ import numpy as np
 from numpy.random import RandomState, default_rng
 import pandas as pd
 
+
 class TargetGenerator(ABC):
 
     def __init__(self, seed: int | RandomState):
@@ -60,12 +61,22 @@ class FeatureGenerator(ABC):
         self._rng = default_rng(seed)
 
     @abstractmethod
-    def __call__(self, n: int, seed: int | RandomState) -> Tuple[np.ndarray, np.ndarray]:
+    def __call__(
+        self, n: int, seed: int | RandomState
+    ) -> Tuple[np.ndarray, np.ndarray]:
         raise NotImplementedError("Not implemented on abstract class.")
 
 
 class UniformFeatureGenerator(FeatureGenerator):
-    def __init__(self, m: int, s: int, *, low: float = 0.0, high: float = 1.0, seed: int | RandomState = 17):
+    def __init__(
+        self,
+        m: int,
+        s: int,
+        *,
+        low: float = 0.0,
+        high: float = 1.0,
+        seed: int | RandomState = 17,
+    ):
         super().__init__(m=m, s=s, seed=seed)
         self._low = low
         self._high = high
@@ -79,7 +90,9 @@ class UniformFeatureGenerator(FeatureGenerator):
 
 class ScenarioGenerator:
 
-    def __init__(self, feature_generator: FeatureGenerator, target_generator: TargetGenerator):
+    def __init__(
+        self, feature_generator: FeatureGenerator, target_generator: TargetGenerator
+    ):
         self._feature_generator = feature_generator
         self._target_generator = target_generator
 
@@ -89,10 +102,10 @@ class ScenarioGenerator:
 
         df = pd.DataFrame()
 
-        df['y'] = y
+        df["y"] = y
         for ii in range(x.shape[0]):
-            df[f'x_{ii}'] = x[ii]
+            df[f"x_{ii}"] = x[ii]
         for ii in range(c.shape[0]):
-            df[f'c_{ii}'] = c[ii]
+            df[f"c_{ii}"] = c[ii]
 
         return df
