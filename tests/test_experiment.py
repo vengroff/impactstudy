@@ -15,7 +15,7 @@ class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
         x = pd.DataFrame(np.ones((n, 3)), columns=["x_0", "x_1", "x_2"])
         c = rng.normal(size=(5, n))
 
-        target_generator = ise.LinearNormalTargetGenerator(a, sigma, seed=seed)
+        target_generator = ise.LinearNormalTargetGenerator(a, 0.0, sigma, seed=seed)
 
         y = target_generator.f_prime(x, c)
 
@@ -43,7 +43,7 @@ class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
         sigma = 0.2
 
         target_generators = [
-            ise.LinearNormalTargetGenerator(a, sigma, seed=seed) for seed in seeds
+            ise.LinearNormalTargetGenerator(a, 0.0, sigma, seed=seed) for seed in seeds
         ]
 
         ys = [target_generator.f_prime(x, c) for target_generator in target_generators]
@@ -76,8 +76,8 @@ class ScenarioGeneratorTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
         fg = ise.UniformFeatureGenerator(2, 2, low=0.0, high=100.0)
-        tg = ise.LinearNormalTargetGenerator([0.5, -1.0], 10.0)
-        self.sg = ise.ScenarioGenerator(fg, tg)
+        tg = ise.LinearNormalTargetGenerator([0.5, -1.0], 0.0, 10.0)
+        self.sg = ise.Scenario(fg, tg)
 
     def test_scenario(self):
         n = 100
