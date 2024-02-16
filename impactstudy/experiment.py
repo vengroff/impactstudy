@@ -8,7 +8,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 from numpy.random import RandomState, default_rng
 import pandas as pd
-from sklearn.metrics import mean_squared_error, mean_absolute_error, median_absolute_error
+from sklearn.metrics import (
+    mean_squared_error,
+    mean_absolute_error,
+    median_absolute_error,
+)
 
 from impactchart.model import ImpactModel, XGBoostImpactModel
 
@@ -44,7 +48,9 @@ class TargetGenerator(ABC):
 
 class LinearNormalTargetGenerator(TargetGenerator):
 
-    def __init__(self, a: np.array, b: float, sigma: float, seed: int | RandomState = 17):
+    def __init__(
+        self, a: np.array, b: float, sigma: float, seed: int | RandomState = 17
+    ):
         super().__init__(seed)
         self._a = a
         self._b = b
@@ -136,7 +142,7 @@ class Scenario:
         feature_generator: FeatureGenerator,
         target_generator: TargetGenerator,
         *,
-        impact_model_seed: int = 0x17E3FB61
+        impact_model_seed: int = 0x17E3FB61,
     ):
         self._feature_generator = feature_generator
         self._target_generator = target_generator
@@ -215,7 +221,7 @@ class Scenario:
                 df[col],
                 df_true_impact[col],
                 c="C1",
-                marker='.',
+                marker=".",
                 s=10,
                 zorder=10,
                 label="Actual impact",
@@ -229,7 +235,11 @@ class Scenario:
 
         df_rmse = np.sqrt(
             pd.DataFrame(
-                [mean_squared_error(df_true_impact, df_model_impact, multioutput="raw_values")],
+                [
+                    mean_squared_error(
+                        df_true_impact, df_model_impact, multioutput="raw_values"
+                    )
+                ],
                 columns=df_true_impact.columns,
             )
         )
@@ -241,7 +251,11 @@ class Scenario:
         df_model_impact = self.model_mean_impact(n)
 
         df_mae = pd.DataFrame(
-            [mean_absolute_error(df_true_impact, df_model_impact, multioutput="raw_values")],
+            [
+                mean_absolute_error(
+                    df_true_impact, df_model_impact, multioutput="raw_values"
+                )
+            ],
             columns=df_true_impact.columns,
         )
 
@@ -252,7 +266,11 @@ class Scenario:
         df_model_impact = self.model_mean_impact(n)
 
         df_mae = pd.DataFrame(
-            [median_absolute_error(df_true_impact, df_model_impact, multioutput="raw_values")],
+            [
+                median_absolute_error(
+                    df_true_impact, df_model_impact, multioutput="raw_values"
+                )
+            ],
             columns=df_true_impact.columns,
         )
 
@@ -263,12 +281,14 @@ class Scenario:
         df_mae = self.mean_absolute_error(n)
         df_medae = self.median_absolute_error(n)
 
-        df_rmse['metric'] = 'RMSE'
-        df_mae['metric'] = 'MAE'
-        df_medae['metric'] = 'MED_AE'
+        df_rmse["metric"] = "RMSE"
+        df_mae["metric"] = "MAE"
+        df_medae["metric"] = "MED_AE"
 
         df_errors = pd.concat([df_rmse, df_mae, df_medae], axis="rows")
-        df_errors = df_errors[['metric'] + [col for col in df_errors.columns if col != 'metric']]
+        df_errors = df_errors[
+            ["metric"] + [col for col in df_errors.columns if col != "metric"]
+        ]
 
         return df_errors
 
@@ -276,7 +296,9 @@ class Scenario:
 class Experiment(ABC):
 
     @abstractmethod
-    def scenarios(self) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
+    def scenarios(
+        self,
+    ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
         raise NotImplementedError("Not implemented on abstract class.")
 
     def model_errors(self, n: int) -> pd.DataFrame:
@@ -295,10 +317,10 @@ class Experiment(ABC):
 class LinearWithNoiseExperiment(Experiment):
 
     def __init__(
-            self,
-            m: int | Iterable[int],
-            s: int | Iterable[int],
-            sigma: int | float | Iterable[float]
+        self,
+        m: int | Iterable[int],
+        s: int | Iterable[int],
+        sigma: int | float | Iterable[float],
     ):
         if isinstance(m, int):
             m = [m]
@@ -311,15 +333,17 @@ class LinearWithNoiseExperiment(Experiment):
         self._s = s
         self._sigma = sigma
 
-    def scenarios(self) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
+    def scenarios(
+        self,
+    ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
         for sigma in self._sigma:
             for m in self._m:
                 for s in self._s:
-                    feature_generator = UniformFeatureGenerator(s=s, m=m, low=0.0, high=100.0)
+                    feature_generator = UniformFeatureGenerator(
+                        s=s, m=m, low=0.0, high=100.0
+                    )
                     target_generator = LinearNormalTargetGenerator(
-                        a=np.linspace(-1.0, 1.0, m),
-                        b=0.0,
-                        sigma=sigma
+                        a=np.linspace(-1.0, 1.0, m), b=0.0, sigma=sigma
                     )
                     scenario = Scenario(feature_generator, target_generator)
                     yield {"m": m, "s": s, "sigma": sigma}, scenario
