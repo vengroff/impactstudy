@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import pandas as pd
 import impactstudy.experiment as ise
 
 
@@ -11,7 +12,7 @@ class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
         n = 5000
 
         rng = np.random.default_rng(37)
-        x = np.ones((3, n))
+        x = pd.DataFrame(np.ones((n, 3)), columns=["x_0", "x_1", "x_2"])
         c = rng.normal(size=(5, n))
 
         target_generator = ise.LinearNormalTargetGenerator(a, sigma, seed=seed)
@@ -32,7 +33,7 @@ class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
 
         rng = np.random.default_rng(seed=12345)
 
-        x = np.ones((3, n))
+        x = pd.DataFrame(np.ones((n, 3)), columns=["x_0", "x_1", "x_2"])
         c = rng.normal(size=(5, n))
 
         # Generate three y's, the first and last seeded the same and the middle
@@ -59,16 +60,31 @@ class UniformFeatureGeneratorTestCase(unittest.TestCase):
         s = 3
         feature_generator = ise.UniformFeatureGenerator(m, s, seed=12345)
 
-        x, c = feature_generator(100)
+        df_x, df_c = feature_generator(100)
 
-        self.assertEqual((5, 100), x.shape)
-        self.assertEqual((3, 100), c.shape)
+        self.assertEqual((100, 5), df_x.shape)
+        self.assertEqual((100, 3), df_c.shape)
 
-        self.assertTrue((x >= 0.0).all())
-        self.assertTrue((x < 1.0).all())
+        self.assertTrue((df_x >= 0.0).all().all())
+        self.assertTrue((df_x < 1.0).all().all())
 
-        self.assertTrue((c >= 0.0).all())
-        self.assertTrue((c < 1.0).all())
+        self.assertTrue((df_c >= 0.0).all().all())
+        self.assertTrue((df_c < 1.0).all().all())
+
+
+class ScenarioGeneratorTestCase(unittest.TestCase):
+
+    def setUp(self) -> None:
+        fg = ise.UniformFeatureGenerator(2, 2, low=0.0, high=100.0)
+        tg = ise.LinearNormalTargetGenerator([0.5, -1.0], 10.0)
+        self.sg = ise.ScenarioGenerator(fg, tg)
+
+    def test_scenario(self):
+        n = 100
+
+        df_scenario = self.sg.scenario(n)
+
+        self.assertEqual((n, 5), df_scenario.shape)
 
 
 if __name__ == "__main__":
