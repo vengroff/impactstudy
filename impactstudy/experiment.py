@@ -341,6 +341,10 @@ class Scenario:
         # Mean impact across the x_i:
         df_errors["mu_x_i"] = df_errors[self.x_cols()].mean(axis="columns")
 
+        # Mean impact across the c_i:
+        if len(self.c_cols()) > 0:
+            df_errors["mu_c_i"] = df_errors[self.c_cols()].mean(axis="columns")
+
         return df_errors
 
     @cache
