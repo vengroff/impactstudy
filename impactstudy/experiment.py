@@ -307,6 +307,10 @@ class Experiment(ABC):
                 df_scenario_model_errors = scenario.model_errors(n)
                 for k, v in tags.items():
                     df_scenario_model_errors[k] = v
+                # Mean impact across the x_i:
+                df_scenario_model_errors["mu_x_i"] = df_scenario_model_errors[
+                    scenario.x_cols()
+                ].mean(axis="columns")
                 yield df_scenario_model_errors
 
         df_model_errors = pd.concat(scenario_errors())
