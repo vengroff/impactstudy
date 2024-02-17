@@ -1,7 +1,7 @@
 """Experiments."""
 
 from abc import ABC, abstractmethod
-from typing import Tuple, List, Dict, Generator, Iterable
+from typing import Tuple, List, Dict, Generator, Iterable, Optional
 from functools import cache
 
 import numpy as np
@@ -13,6 +13,7 @@ from sklearn.metrics import (
     mean_absolute_error,
     median_absolute_error,
 )
+from sklearn.linear_model import LinearRegression
 
 from impactchart.model import ImpactModel, XGBoostImpactModel
 
@@ -160,7 +161,7 @@ class Scenario:
     def y_col(self) -> str:
         return "y"
 
-    def scenario(self, n: int) -> pd.DataFrame:
+    def training_data(self, n: int) -> pd.DataFrame:
         df_x, df_c = self._feature_generator(n)
         y = self._target_generator.f_prime(df_x, df_c)
 
@@ -183,7 +184,7 @@ class Scenario:
 
     @cache
     def impact_model(self, n: int) -> ImpactModel:
-        df = self.scenario(n)
+        df = self.training_data(n)
 
         df_X_prime = df[self.x_prime_cols()]
         y = df[self.y_col()]
@@ -197,15 +198,17 @@ class Scenario:
     def model_mean_impact(self, n: int) -> pd.DataFrame:
         impact_model = self.impact_model(n)
 
-        df = self.scenario(n)
+        df = self.training_data(n)
         df_X_prime = df[self.x_prime_cols()]
 
         return impact_model.mean_impact(df_X_prime)
 
-    def model_impact_charts(self, n: int) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
+    def model_impact_charts(
+        self, n: int, linreg_overlay: bool = False
+    ) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
         impact_model = self.impact_model(n)
 
-        df = self.scenario(n)
+        df = self.training_data(n)
         df_X_prime = df[self.x_prime_cols()]
 
         impact_charts = impact_model.impact_charts(
@@ -220,18 +223,33 @@ class Scenario:
             ax.scatter(
                 df[col],
                 df_true_impact[col],
-                c="C1",
+                c="orange",
                 marker=".",
                 s=10,
                 zorder=10,
                 label="Actual impact",
             )
 
+            if linreg_overlay:
+                df_linreg_impact = self.linreg_impact(n, col)
+                ax.scatter(
+                    df_linreg_impact[col],
+                    df_linreg_impact["y_hat"],
+                    c="purple",
+                    marker=".",
+                    s=10,
+                    zorder=9,
+                    label="Linear regression impact",
+                )
+
         return impact_charts
 
-    def root_mean_squared_error(self, n: int) -> pd.DataFrame:
+    def root_mean_squared_error(
+        self, n: int, df_model_impact: Optional[pd.DataFrame] = None
+    ) -> pd.DataFrame:
         df_true_impact = self.true_impact(n)
-        df_model_impact = self.model_mean_impact(n)
+        if df_model_impact is None:
+            df_model_impact = self.model_mean_impact(n)
 
         df_rmse = np.sqrt(
             pd.DataFrame(
@@ -246,9 +264,12 @@ class Scenario:
 
         return df_rmse
 
-    def mean_absolute_error(self, n: int) -> pd.DataFrame:
+    def mean_absolute_error(
+        self, n: int, df_model_impact: Optional[pd.DataFrame] = None
+    ) -> pd.DataFrame:
         df_true_impact = self.true_impact(n)
-        df_model_impact = self.model_mean_impact(n)
+        if df_model_impact is None:
+            df_model_impact = self.model_mean_impact(n)
 
         df_mae = pd.DataFrame(
             [
@@ -261,9 +282,12 @@ class Scenario:
 
         return df_mae
 
-    def median_absolute_error(self, n: int) -> pd.DataFrame:
+    def median_absolute_error(
+        self, n: int, df_model_impact: Optional[pd.DataFrame] = None
+    ) -> pd.DataFrame:
         df_true_impact = self.true_impact(n)
-        df_model_impact = self.model_mean_impact(n)
+        if df_model_impact is None:
+            df_model_impact = self.model_mean_impact(n)
 
         df_mae = pd.DataFrame(
             [
@@ -276,7 +300,7 @@ class Scenario:
 
         return df_mae
 
-    def model_errors(self, n: int) -> pd.DataFrame:
+    def model_errors(self, n: int, *, linreg_errors: bool = False) -> pd.DataFrame:
         df_rmse = self.root_mean_squared_error(n)
         df_mae = self.mean_absolute_error(n)
         df_medae = self.median_absolute_error(n)
@@ -285,12 +309,82 @@ class Scenario:
         df_mae["metric"] = "MAE"
         df_medae["metric"] = "MED_AE"
 
-        df_errors = pd.concat([df_rmse, df_mae, df_medae], axis="rows")
+        if linreg_errors:
+            df_linreg_impact = self.linreg_impacts(n)
+
+            df_linreg_rmse = self.root_mean_squared_error(n, df_linreg_impact)
+            df_linreg_mae = self.mean_absolute_error(n, df_linreg_impact)
+            df_linreg_medae = self.median_absolute_error(n, df_linreg_impact)
+
+            df_linreg_rmse["metric"] = "LR_RMSE"
+            df_linreg_mae["metric"] = "LR_MAE"
+            df_linreg_medae["metric"] = "LR_MED_AE"
+
+            df_errors = pd.concat(
+                [
+                    df_rmse,
+                    df_mae,
+                    df_medae,
+                    df_linreg_rmse,
+                    df_linreg_mae,
+                    df_linreg_medae,
+                ],
+                axis="rows",
+            )
+        else:
+            df_errors = pd.concat([df_rmse, df_mae, df_medae], axis="rows")
+
         df_errors = df_errors[
             ["metric"] + [col for col in df_errors.columns if col != "metric"]
         ]
 
+        # Mean impact across the x_i:
+        df_errors["mu_x_i"] = df_errors[self.x_cols()].mean(axis="columns")
+
         return df_errors
+
+    @cache
+    def linreg_model(self, n: int) -> LinearRegression:
+        linreg = LinearRegression()
+
+        df_training = self.training_data(n)
+
+        linreg.fit(df_training[self.x_prime_cols()], df_training[self.y_col()])
+
+        return linreg
+
+    def y_hat_linreg(self, n: int) -> pd.Series:
+        return self.linreg_model(n).predict(self.training_data(n)[self.x_prime_cols()])
+
+    def linreg_impacts(self, n: int) -> pd.DataFrame:
+        df_linreg_impacts = pd.concat(
+            (
+                self.linreg_impact(n, feature)["y_hat"].rename(feature)
+                for feature in self.x_prime_cols()
+            ),
+            axis="columns",
+        )
+
+        return df_linreg_impacts
+
+    def linreg_impact(self, n: int, feature: str) -> pd.DataFrame:
+        # Create a data frame that has the mean value for every
+        # column except the feature we are interested in, where
+        # the values remain the original.
+        df_training = self.training_data(n)
+
+        df_mean_x_prime = df_training[self.x_prime_cols()].copy()
+        for col in df_mean_x_prime.columns:
+            if col != feature:
+                df_mean_x_prime[col] = df_mean_x_prime[col].mean()
+
+        mean_y = df_training[self.y_col()].mean()
+
+        df_mean_x_prime["y_hat"] = (
+            self.linreg_model(n).predict(df_mean_x_prime) - mean_y
+        )
+
+        return df_mean_x_prime[[feature, "y_hat"]]
 
 
 class Experiment(ABC):
@@ -301,16 +395,17 @@ class Experiment(ABC):
     ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
         raise NotImplementedError("Not implemented on abstract class.")
 
-    def model_errors(self, n: int) -> pd.DataFrame:
+    def model_errors(
+        self, n: int, *, linreg_errors: Optional[bool] = False
+    ) -> pd.DataFrame:
         def scenario_errors() -> Generator[pd.DataFrame, None, None]:
             for tags, scenario in self.scenarios():
-                df_scenario_model_errors = scenario.model_errors(n)
+                df_scenario_model_errors = scenario.model_errors(
+                    n, linreg_errors=linreg_errors
+                )
                 for k, v in tags.items():
                     df_scenario_model_errors[k] = v
-                # Mean impact across the x_i:
-                df_scenario_model_errors["mu_x_i"] = df_scenario_model_errors[
-                    scenario.x_cols()
-                ].mean(axis="columns")
+
                 yield df_scenario_model_errors
 
         df_model_errors = pd.concat(scenario_errors())

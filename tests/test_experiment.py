@@ -82,7 +82,7 @@ class ScenarioGeneratorTestCase(unittest.TestCase):
     def test_scenario(self):
         n = 100
 
-        df_scenario = self.sg.scenario(n)
+        df_scenario = self.sg.training_data(n)
 
         self.assertEqual((n, 5), df_scenario.shape)
 
