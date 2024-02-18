@@ -121,14 +121,18 @@ class StepExactTargetGenerator(ExactTargetGenerator):
 
     def f(self, df_x: pd.DataFrame) -> pd.Series:
         return pd.Series(
-            np.where(df_x['x_0'] < self._step_at, self._step_base, self._step_base + self._step_size),
+            np.where(
+                df_x["x_0"] < self._step_at,
+                self._step_base,
+                self._step_base + self._step_size,
+            ),
             index=df_x.index,
-            name='f'
+            name="f",
         )
 
     def impact(self, x: pd.DataFrame) -> pd.DataFrame:
         f = self.f(x)
-        df_impact = pd.DataFrame(f).rename({'f': 'x_0'}, axis='columns')
+        df_impact = pd.DataFrame(f).rename({"f": "x_0"}, axis="columns")
         return df_impact
 
 
@@ -594,7 +598,11 @@ class LinearAndStepWithNoiseExperiment(Experiment):
                 for m_step in self._m_step:
                     for s in self._s:
                         feature_generator = UniformFeatureGenerator(
-                            s=s, m=m_linear + m_step, low=0.0, high=100.0, seed=self._seed
+                            s=s,
+                            m=m_linear + m_step,
+                            low=0.0,
+                            high=100.0,
+                            seed=self._seed,
                         )
 
                         if m_linear > 0:
@@ -606,10 +614,14 @@ class LinearAndStepWithNoiseExperiment(Experiment):
 
                         if m_step > 0:
                             step_exact_target_generators = [
-                                StepExactTargetGenerator(50.0, 100.0 - 10.0 * ii, -50.0 + 5.0 * ii)
+                                StepExactTargetGenerator(
+                                    50.0, 100.0 - 10.0 * ii, -50.0 + 5.0 * ii
+                                )
                                 for ii in range(m_step)
                             ]
-                            steps_exact_target_generator = AdditiveExactTargetGenerator(step_exact_target_generators)
+                            steps_exact_target_generator = AdditiveExactTargetGenerator(
+                                step_exact_target_generators
+                            )
                         else:
                             steps_exact_target_generator = None
 
@@ -619,7 +631,10 @@ class LinearAndStepWithNoiseExperiment(Experiment):
                             exact_target_generator = linear_exact_target_generator
                         else:
                             exact_target_generator = AdditiveExactTargetGenerator(
-                                [steps_exact_target_generator, linear_exact_target_generator]
+                                [
+                                    steps_exact_target_generator,
+                                    linear_exact_target_generator,
+                                ]
                             )
 
                         target_generator = add_normal_noise(
@@ -629,5 +644,9 @@ class LinearAndStepWithNoiseExperiment(Experiment):
                         )
 
                         scenario = Scenario(feature_generator, target_generator)
-                        yield {"m_linear": m_linear, "m_step": m_step, "s": s, "sigma": sigma}, scenario
-
+                        yield {
+                            "m_linear": m_linear,
+                            "m_step": m_step,
+                            "s": s,
+                            "sigma": sigma,
+                        }, scenario
