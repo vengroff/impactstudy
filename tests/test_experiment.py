@@ -6,11 +6,72 @@ import pandas as pd
 from numpy.random import RandomState
 
 import impactstudy.experiment as ise
-from impactstudy.experiment import (
-    TargetGenerator,
-    LinearExactTargetGenerator,
-    NormalNoiseGenerator,
-)
+
+
+class StepTest(unittest.TestCase):
+
+    def test_step(self):
+        step_target_generator = ise.StepExactTargetGenerator(50.0, 200.0, -100.0)
+
+        df = 50.0 + pd.DataFrame([[-10.0], [-5.0], [0.0], [7.0], [27.0]], columns=['x_0'])
+
+        y = step_target_generator.f(df)
+        impact = step_target_generator.impact(df)
+
+        self.assertTrue(
+            pd.Series([-100.0, -100.0, 100.0, 100.0, 100.0]).equals(y)
+        )
+
+        self.assertTrue(
+            pd.DataFrame([[-100.0], [-100.0], [100.0], [100.0], [100.0]], columns=['x_0']).equals(impact)
+        )
+
+    def test_two_step(self):
+        step_target_generator_1 = ise.StepExactTargetGenerator(25.0, 100.0, 0.0)
+        step_target_generator_2 = ise.StepExactTargetGenerator(75.0, -100.0, 0.0)
+
+        target_generator = ise.AdditiveExactTargetGenerator([step_target_generator_1, step_target_generator_2])
+
+        df = pd.DataFrame(
+            [
+                [0.0, 100.0],
+                [10.0, 90.0],
+                [25.0, 80.0],
+                [30.0, 75.0],
+                [50.0, 50.0]
+            ],
+            columns=['x_0', 'x_1']
+        )
+
+        y = target_generator.f(df)
+
+        self.assertTrue(
+            pd.Series([-100.0, -100.0, 0.0, 0.0, 100.0]).equals(y)
+        )
+
+        df_impact = target_generator.impact(df)
+
+        df_expected_impact = pd.DataFrame(
+            [
+                [0.0, -100.0],
+                [0.0, -100.0],
+                [100.0, -100.0],
+                [100.0, -100.0],
+                [100.0, 0.0]
+            ],
+            columns=['x_0', 'x_1']
+        )
+
+        self.assertTrue(df_expected_impact.equals(df_impact))
+
+
+def linear_normal_target_generator(
+    a: np.array, b: float, sigma: float, seed: int | RandomState = 17
+) -> ise.TargetGenerator:
+    linear_exact_target_generator = ise.LinearExactTargetGenerator(a, b)
+    normal_noise_generator = ise.NormalNoiseGenerator(sigma, seed=seed)
+
+    return ise.TargetGenerator(linear_exact_target_generator, normal_noise_generator)
 
 
 class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
@@ -177,12 +238,3 @@ class AdditiveFeatureTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-def linear_normal_target_generator(
-    a: np.array, b: float, sigma: float, seed: int | RandomState = 17
-) -> TargetGenerator:
-    linear_exact_target_generator = LinearExactTargetGenerator(a, b)
-    normal_noise_generator = NormalNoiseGenerator(sigma, seed=seed)
-
-    return TargetGenerator(linear_exact_target_generator, normal_noise_generator)

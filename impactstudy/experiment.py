@@ -82,7 +82,6 @@ class TargetGenerator:
 
 class LinearExactTargetGenerator(ExactTargetGenerator):
     def __init__(self, a: np.array, b: float):
-        super().__init__()
         self._a = a
         self._b = b
 
@@ -111,6 +110,28 @@ class LinearExactTargetGenerator(ExactTargetGenerator):
         return impact
 
 
+class StepExactTargetGenerator(ExactTargetGenerator):
+    def __init__(self, step_at: float, step_size: float, step_base: float = 0.0):
+        self._step_at = step_at
+        self._step_size = step_size
+        self._step_base = step_base
+
+    def arity(self) -> int:
+        return 1
+
+    def f(self, df_x: pd.DataFrame) -> pd.Series:
+        return pd.Series(
+            np.where(df_x['x_0'] < self._step_at, self._step_base, self._step_base + self._step_size),
+            index=df_x.index,
+            name='f'
+        )
+
+    def impact(self, x: pd.DataFrame) -> pd.DataFrame:
+        f = self.f(x)
+        df_impact = pd.DataFrame(f).rename({'f': 'x_0'}, axis='columns')
+        return df_impact
+
+
 def add_normal_noise(
     exact_target_generator: ExactTargetGenerator,
     sigma: float,
@@ -134,7 +155,7 @@ class AdditiveExactTargetGenerator(ExactTargetGenerator):
         f = 0.0
 
         for tg in self._exact_target_generators:
-            sub_x = x[[f"x_{offset + ii}" for ii in range(tg.arity())]]
+            sub_x = pd.DataFrame(x[[f"x_{offset + ii}" for ii in range(tg.arity())]])
             sub_x = sub_x.rename(
                 {f"x_{offset + ii}": f"x_{ii}" for ii in range(tg.arity())},
                 axis="columns",
@@ -149,7 +170,7 @@ class AdditiveExactTargetGenerator(ExactTargetGenerator):
         df_impact = pd.DataFrame()
 
         for tg in self._exact_target_generators:
-            df_sub_x = x[[f"x_{offset + ii}" for ii in range(tg.arity())]]
+            df_sub_x = pd.DataFrame(x[[f"x_{offset + ii}" for ii in range(tg.arity())]])
             df_sub_x.rename(
                 {f"x_{offset + ii}": f"x_{ii}" for ii in range(tg.arity())},
                 axis="columns",
@@ -538,3 +559,75 @@ class LinearWithNoiseExperiment(Experiment):
 
                     scenario = Scenario(feature_generator, target_generator)
                     yield {"m": m, "s": s, "sigma": sigma}, scenario
+
+
+class LinearAndStepWithNoiseExperiment(Experiment):
+
+    def __init__(
+        self,
+        m_linear: int | Iterable[int],
+        m_step: int | Iterable[int],
+        s: int | Iterable[int],
+        sigma: int | float | Iterable[float],
+        seed: Optional[int] = 17,
+    ):
+        if isinstance(m_linear, int):
+            m_linear = [m_linear]
+        if isinstance(m_step, int):
+            m_step = [m_step]
+        if isinstance(s, int):
+            s = [s]
+        if isinstance(sigma, (int, float)):
+            sigma = [sigma]
+
+        self._m_linear = m_linear
+        self._m_step = m_step
+        self._s = s
+        self._sigma = sigma
+        self._seed = seed
+
+    def scenarios(
+        self,
+    ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
+        for sigma in self._sigma:
+            for m_linear in self._m_linear:
+                for m_step in self._m_step:
+                    for s in self._s:
+                        feature_generator = UniformFeatureGenerator(
+                            s=s, m=m_linear + m_step, low=0.0, high=100.0, seed=self._seed
+                        )
+
+                        if m_linear > 0:
+                            linear_exact_target_generator = LinearExactTargetGenerator(
+                                a=np.linspace(-1.0, 1.0, m_linear), b=0.0
+                            )
+                        else:
+                            linear_exact_target_generator = None
+
+                        if m_step > 0:
+                            step_exact_target_generators = [
+                                StepExactTargetGenerator(50.0, 100.0 - 10.0 * ii, -50.0 + 5.0 * ii)
+                                for ii in range(m_step)
+                            ]
+                            steps_exact_target_generator = AdditiveExactTargetGenerator(step_exact_target_generators)
+                        else:
+                            steps_exact_target_generator = None
+
+                        if linear_exact_target_generator is None:
+                            exact_target_generator = steps_exact_target_generator
+                        elif steps_exact_target_generator is None:
+                            exact_target_generator = linear_exact_target_generator
+                        else:
+                            exact_target_generator = AdditiveExactTargetGenerator(
+                                [steps_exact_target_generator, linear_exact_target_generator]
+                            )
+
+                        target_generator = add_normal_noise(
+                            exact_target_generator,
+                            sigma,
+                            seed=(17 * self._seed) % 0x7FFFFFFF,
+                        )
+
+                        scenario = Scenario(feature_generator, target_generator)
+                        yield {"m_linear": m_linear, "m_step": m_step, "s": s, "sigma": sigma}, scenario
+
