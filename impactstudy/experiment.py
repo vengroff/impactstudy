@@ -18,19 +18,35 @@ from sklearn.linear_model import LinearRegression
 from impactchart.model import ImpactModel, XGBoostImpactModel
 
 
-class TargetGenerator(ABC):
-
+class NoiseGenerator(ABC):
     def __init__(self, seed: int | RandomState):
         self._rng = default_rng(seed=seed)
 
-    def f_prime(self, x: pd.DataFrame, c: pd.DataFrame) -> pd.DataFrame:
-        f = self.f(x)
-        z = self.z(size=x.shape[0])
+    @abstractmethod
+    def z(self, size: int) -> pd.Series:
+        """The noise $Z$."""
+        raise NotImplementedError("Not implemented on abstract class.")
 
-        return f + z
 
-    def setup(self):
-        np.random.seed(self._seed)
+class NormalNoiseGenerator(NoiseGenerator):
+    def __init__(self, sigma: float, seed: int | RandomState):
+        super().__init__(seed)
+        self._sigma = sigma
+
+    @property
+    def sigma(self) -> float:
+        return self._sigma
+
+    @cache
+    def z(self, size: int) -> pd.Series:
+        return pd.Series(self._rng.normal(0, self.sigma, size=size), name="z")
+
+
+class ExactTargetGenerator(ABC):
+
+    @abstractmethod
+    def arity(self) -> int:
+        raise NotImplementedError("Not implemented on abstract class.")
 
     @abstractmethod
     def f(self, x: pd.DataFrame) -> pd.Series:
@@ -41,21 +57,37 @@ class TargetGenerator(ABC):
     def impact(self, x: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError("Not implemented on abstract class.")
 
-    @abstractmethod
-    def z(self, size: int) -> pd.Series:
-        """The noise $Z$."""
-        raise NotImplementedError("Not implemented on abstract class.")
 
-
-class LinearNormalTargetGenerator(TargetGenerator):
-
+class TargetGenerator:
     def __init__(
-        self, a: np.array, b: float, sigma: float, seed: int | RandomState = 17
+        self,
+        exact_target_generator: ExactTargetGenerator,
+        noise: Optional[NoiseGenerator] = None,
     ):
-        super().__init__(seed)
+        self._exact_target_generator = exact_target_generator
+        self._noise = noise
+
+    def f_prime(self, x: pd.DataFrame, c: pd.DataFrame) -> pd.DataFrame:
+        f = self._exact_target_generator.f(x)
+
+        if self._noise is None:
+            return f
+
+        z = self._noise.z(size=x.shape[0])
+        return f + z
+
+    def impact(self, x: pd.DataFrame) -> pd.DataFrame:
+        return self._exact_target_generator.impact(x)
+
+
+class LinearExactTargetGenerator(ExactTargetGenerator):
+    def __init__(self, a: np.array, b: float):
+        super().__init__()
         self._a = a
         self._b = b
-        self._sigma = sigma
+
+    def arity(self) -> int:
+        return len(self._a)
 
     @property
     def a(self) -> np.array:
@@ -64,10 +96,6 @@ class LinearNormalTargetGenerator(TargetGenerator):
     @property
     def b(self) -> float:
         return self._b
-
-    @property
-    def sigma(self) -> float:
-        return self._sigma
 
     def f(self, df_x: pd.DataFrame) -> pd.Series:
         df_ax = df_x.mul(self._a, axis="columns")
@@ -82,9 +110,80 @@ class LinearNormalTargetGenerator(TargetGenerator):
 
         return impact
 
-    @cache
-    def z(self, size: int) -> pd.Series:
-        return pd.Series(self._rng.normal(0, self._sigma, size=size), name="z")
+
+class LinearNormalTargetGenerator(TargetGenerator):
+    def __init__(
+        self, a: np.array, b: float, sigma: float, seed: int | RandomState = 17
+    ):
+        linear_exact_target_generator = LinearExactTargetGenerator(a, b)
+        normal_noise_generator = NormalNoiseGenerator(sigma, seed=seed)
+
+        super().__init__(linear_exact_target_generator, normal_noise_generator)
+
+        self._linear_exact_target_generator = linear_exact_target_generator
+        self._normal_noise_generator = normal_noise_generator
+
+    def arity(self) -> int:
+        return self._linear_exact_target_generator.arity()
+
+    @property
+    def a(self) -> np.array:
+        return self._linear_exact_target_generator.a
+
+    @property
+    def b(self) -> float:
+        return self._linear_exact_target_generator.b
+
+    @property
+    def sigma(self) -> float:
+        return self._normal_noise_generator.sigma
+
+
+class AdditiveExactTargetGenerator(ExactTargetGenerator):
+
+    def __init__(self, exact_target_generators: Iterable[ExactTargetGenerator]):
+        self._exact_target_generators = exact_target_generators
+
+    def arity(self) -> int:
+        return sum(tg.arity() for tg in self._exact_target_generators)
+
+    def f(self, x: pd.DataFrame) -> pd.Series:
+        offset = 0
+        f = 0.0
+
+        for tg in self._exact_target_generators:
+            sub_x = x[[f"x_{offset + ii}" for ii in range(tg.arity())]]
+            sub_x = sub_x.rename(
+                {f"x_{offset + ii}": f"x_{ii}" for ii in range(tg.arity())},
+                axis="columns",
+            )
+            f += tg.f(sub_x)
+            offset += tg.arity()
+
+        return f
+
+    def impact(self, x: pd.DataFrame) -> pd.DataFrame:
+        offset = 0
+        df_impact = pd.DataFrame()
+
+        for tg in self._exact_target_generators:
+            df_sub_x = x[[f"x_{offset + ii}" for ii in range(tg.arity())]]
+            df_sub_x.rename(
+                {f"x_{offset + ii}": f"x_{ii}" for ii in range(tg.arity())},
+                axis="columns",
+                inplace=True,
+            )
+            df_sub_impact = tg.impact(df_sub_x)
+            df_sub_impact.rename(
+                {f"x_{ii}": f"x_{offset + ii}" for ii in range(tg.arity())},
+                axis="columns",
+                inplace=True,
+            )
+            offset += tg.arity()
+
+            df_impact = pd.concat([df_impact, df_sub_impact], axis="columns")
+
+        return df_impact
 
 
 class FeatureGenerator(ABC):
@@ -105,9 +204,7 @@ class FeatureGenerator(ABC):
         return self.x_cols() + self.c_cols()
 
     @abstractmethod
-    def __call__(
-        self, n: int, seed: int | RandomState
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def __call__(self, n: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
         raise NotImplementedError("Not implemented on abstract class.")
 
 

@@ -1,6 +1,10 @@
 import unittest
+from typing import Tuple
+
 import numpy as np
 import pandas as pd
+from numpy.random import RandomState
+
 import impactstudy.experiment as ise
 
 
@@ -85,6 +89,85 @@ class ScenarioGeneratorTestCase(unittest.TestCase):
         df_scenario = self.sg.training_data(n)
 
         self.assertEqual((n, 5), df_scenario.shape)
+
+
+class MockFeatureGenerator(ise.FeatureGenerator):
+
+    def __init__(self, m: int):
+        super().__init__(m, 1, 17)
+
+    def __call__(self, n: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        return pd.DataFrame(
+            [[100.0 * ii + jj for jj in range(self._m)] for ii in range(n)],
+            columns=[f"x_{ii}" for ii in range(self._m)],
+        ), pd.DataFrame([[1.0]] * n, columns=["c_0"])
+
+
+class MockTwoColumnTargetGenerator(ise.ExactTargetGenerator):
+    def arity(self) -> int:
+        return 2
+
+    def f(self, x: pd.DataFrame) -> pd.Series:
+        # We expect these column names even if they
+        # were mapped out of a wider set of features.
+        return 1000 * x["x_0"] + x["x_1"]
+
+    def impact(self, x: pd.DataFrame) -> pd.DataFrame:
+        df_impact = pd.DataFrame()
+        df_impact["x_0"] = 1000 * x["x_0"]
+        df_impact["x_1"] = x["x_1"]
+
+        return df_impact
+
+
+class AdditiveFeatureTestCase(unittest.TestCase):
+
+    def test_additive_feature(self):
+        feature_generator = MockFeatureGenerator(6)
+
+        additive_target_generator = ise.AdditiveExactTargetGenerator(
+            [
+                MockTwoColumnTargetGenerator(),
+                MockTwoColumnTargetGenerator(),
+                MockTwoColumnTargetGenerator(),
+            ],
+        )
+
+        self.assertEqual(6, additive_target_generator.arity())
+
+        scenario = ise.Scenario(
+            feature_generator, ise.TargetGenerator(additive_target_generator)
+        )
+
+        x_cols = scenario.x_cols()
+
+        self.assertEqual(["x_0", "x_1", "x_2", "x_3", "x_4", "x_5"], x_cols)
+
+        df_true_impact = scenario.true_impact(3)
+
+        self.assertTrue(
+            pd.DataFrame(
+                [
+                    [0.0, 1.0, 2_000.0, 3.0, 4_000.0, 5.0, 0.0],
+                    [100_000.0, 101.0, 102_000.0, 103.0, 104_000.0, 105.0, 0.0],
+                    [200_000.0, 201.0, 202_000.0, 203.0, 204_000.0, 205.0, 0.0],
+                ],
+                columns=["x_0", "x_1", "x_2", "x_3", "x_4", "x_5", "c_0"],
+            ).equals(df_true_impact)
+        )
+
+        df_training_data = scenario.training_data(3)
+
+        self.assertTrue(
+            pd.DataFrame(
+                [
+                    [6_009.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 1.0],
+                    [306_309.0, 100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 1.0],
+                    [606_609.0, 200.0, 201.0, 202.0, 203.0, 204.0, 205.0, 1.0],
+                ],
+                columns=["y", "x_0", "x_1", "x_2", "x_3", "x_4", "x_5", "c_0"],
+            ).equals(df_training_data)
+        )
 
 
 if __name__ == "__main__":
