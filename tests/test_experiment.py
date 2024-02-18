@@ -6,6 +6,11 @@ import pandas as pd
 from numpy.random import RandomState
 
 import impactstudy.experiment as ise
+from impactstudy.experiment import (
+    TargetGenerator,
+    LinearExactTargetGenerator,
+    NormalNoiseGenerator,
+)
 
 
 class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
@@ -19,7 +24,7 @@ class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
         x = pd.DataFrame(np.ones((n, 3)), columns=["x_0", "x_1", "x_2"])
         c = rng.normal(size=(5, n))
 
-        target_generator = ise.LinearNormalTargetGenerator(a, 0.0, sigma, seed=seed)
+        target_generator = linear_normal_target_generator(a, 0.0, sigma, seed=seed)
 
         y = target_generator.f_prime(x, c)
 
@@ -47,7 +52,7 @@ class LinearNormalTargetGeneratorTestCase(unittest.TestCase):
         sigma = 0.2
 
         target_generators = [
-            ise.LinearNormalTargetGenerator(a, 0.0, sigma, seed=seed) for seed in seeds
+            linear_normal_target_generator(a, 0.0, sigma, seed=seed) for seed in seeds
         ]
 
         ys = [target_generator.f_prime(x, c) for target_generator in target_generators]
@@ -80,7 +85,7 @@ class ScenarioGeneratorTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
         fg = ise.UniformFeatureGenerator(2, 2, low=0.0, high=100.0)
-        tg = ise.LinearNormalTargetGenerator([0.5, -1.0], 0.0, 10.0)
+        tg = linear_normal_target_generator([0.5, -1.0], 0.0, 10.0)
         self.sg = ise.Scenario(fg, tg)
 
     def test_scenario(self):
@@ -172,3 +177,12 @@ class AdditiveFeatureTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def linear_normal_target_generator(
+    a: np.array, b: float, sigma: float, seed: int | RandomState = 17
+) -> TargetGenerator:
+    linear_exact_target_generator = LinearExactTargetGenerator(a, b)
+    normal_noise_generator = NormalNoiseGenerator(sigma, seed=seed)
+
+    return TargetGenerator(linear_exact_target_generator, normal_noise_generator)

@@ -111,32 +111,14 @@ class LinearExactTargetGenerator(ExactTargetGenerator):
         return impact
 
 
-class LinearNormalTargetGenerator(TargetGenerator):
-    def __init__(
-        self, a: np.array, b: float, sigma: float, seed: int | RandomState = 17
-    ):
-        linear_exact_target_generator = LinearExactTargetGenerator(a, b)
-        normal_noise_generator = NormalNoiseGenerator(sigma, seed=seed)
+def add_normal_noise(
+    exact_target_generator: ExactTargetGenerator,
+    sigma: float,
+    seed: int | RandomState = 17,
+) -> TargetGenerator:
+    normal_noise_generator = NormalNoiseGenerator(sigma, seed=seed)
 
-        super().__init__(linear_exact_target_generator, normal_noise_generator)
-
-        self._linear_exact_target_generator = linear_exact_target_generator
-        self._normal_noise_generator = normal_noise_generator
-
-    def arity(self) -> int:
-        return self._linear_exact_target_generator.arity()
-
-    @property
-    def a(self) -> np.array:
-        return self._linear_exact_target_generator.a
-
-    @property
-    def b(self) -> float:
-        return self._linear_exact_target_generator.b
-
-    @property
-    def sigma(self) -> float:
-        return self._normal_noise_generator.sigma
+    return TargetGenerator(exact_target_generator, normal_noise_generator)
 
 
 class AdditiveExactTargetGenerator(ExactTargetGenerator):
@@ -521,6 +503,7 @@ class LinearWithNoiseExperiment(Experiment):
         m: int | Iterable[int],
         s: int | Iterable[int],
         sigma: int | float | Iterable[float],
+        seed: Optional[int] = 17,
     ):
         if isinstance(m, int):
             m = [m]
@@ -532,6 +515,7 @@ class LinearWithNoiseExperiment(Experiment):
         self._m = m
         self._s = s
         self._sigma = sigma
+        self._seed = seed
 
     def scenarios(
         self,
@@ -540,10 +524,17 @@ class LinearWithNoiseExperiment(Experiment):
             for m in self._m:
                 for s in self._s:
                     feature_generator = UniformFeatureGenerator(
-                        s=s, m=m, low=0.0, high=100.0
+                        s=s, m=m, low=0.0, high=100.0, seed=self._seed
                     )
-                    target_generator = LinearNormalTargetGenerator(
-                        a=np.linspace(-1.0, 1.0, m), b=0.0, sigma=sigma
+
+                    linear_exact_target_generator = LinearExactTargetGenerator(
+                        a=np.linspace(-1.0, 1.0, m), b=0.0
                     )
+                    target_generator = add_normal_noise(
+                        linear_exact_target_generator,
+                        sigma,
+                        seed=(17 * self._seed) % 0x7FFFFFFF,
+                    )
+
                     scenario = Scenario(feature_generator, target_generator)
                     yield {"m": m, "s": s, "sigma": sigma}, scenario
