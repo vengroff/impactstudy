@@ -451,6 +451,9 @@ class Scenario:
 
         return df_errors
 
+    def model_r2(self, n: int) -> float:
+        return self.impact_model(n).r2_
+
     @cache
     def linreg_model(self, n: int) -> LinearRegression:
         linreg = LinearRegression()
@@ -463,6 +466,13 @@ class Scenario:
 
     def y_hat_linreg(self, n: int) -> pd.Series:
         return self.linreg_model(n).predict(self.training_data(n)[self.x_prime_cols()])
+
+    def linreg_r2(self, n: int) -> float:
+        df_training = self.training_data(n)
+
+        return self.linreg_model(n).score(
+            df_training[self.x_prime_cols()], df_training[self.y_col()]
+        )
 
     def linreg_impacts(self, n: int) -> pd.DataFrame:
         df_linreg_impacts = pd.concat(
@@ -513,12 +523,22 @@ class Experiment(ABC):
                 )
                 for k, v in tags.items():
                     df_scenario_model_errors[k] = v
+                df_scenario_model_errors["IM_R2"] = scenario.model_r2(n)
+                df_scenario_model_errors["LR_R2"] = scenario.linreg_r2(n)
 
                 yield df_scenario_model_errors
 
         df_model_errors = pd.concat(scenario_errors())
 
         return df_model_errors
+
+    def scores(self, n: int) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                dict(IM_R2=scenario.model_r2(n), LR_R2=scenario.linreg_r2(n), **tags)
+                for tags, scenario in self.scenarios()
+            ]
+        ).reset_index(drop=True)
 
 
 class LinearWithNoiseExperiment(Experiment):
