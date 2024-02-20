@@ -18,14 +18,14 @@ class StepTest(unittest.TestCase):
         )
 
         y = step_target_generator.f(df)
-        impact = step_target_generator.impact(df)
+        df_impact = step_target_generator.impact(df)
 
         self.assertTrue(pd.Series([-100.0, -100.0, 100.0, 100.0, 100.0]).equals(y))
 
         self.assertTrue(
             pd.DataFrame(
-                [[-100.0], [-100.0], [100.0], [100.0], [100.0]], columns=["x_0"]
-            ).equals(impact)
+                [[-120.0], [-120.0], [80.0], [80.0], [80.0]], columns=["x_0"]
+            ).equals(df_impact)
         )
 
     def test_two_step(self):
@@ -49,11 +49,11 @@ class StepTest(unittest.TestCase):
 
         df_expected_impact = pd.DataFrame(
             [
-                [0.0, -100.0],
-                [0.0, -100.0],
-                [100.0, -100.0],
-                [100.0, -100.0],
-                [100.0, 0.0],
+                [-60.0, -20.0],
+                [-60.0, -20.0],
+                [40.0, -20.0],
+                [40.0, -20.0],
+                [40.0, 80.0],
             ],
             columns=["x_0", "x_1"],
         )
@@ -176,8 +176,8 @@ class MockTwoColumnTargetGenerator(ise.ExactTargetGenerator):
 
     def impact(self, x: pd.DataFrame) -> pd.DataFrame:
         df_impact = pd.DataFrame()
-        df_impact["x_0"] = 1000 * x["x_0"]
-        df_impact["x_1"] = x["x_1"]
+        df_impact["x_0"] = 1000 * x["x_0"] + x["x_1"].mean()
+        df_impact["x_1"] = 1000 * x["x_0"].mean() + x["x_1"]
 
         return df_impact
 
@@ -205,19 +205,6 @@ class AdditiveFeatureTestCase(unittest.TestCase):
 
         self.assertEqual(["x_0", "x_1", "x_2", "x_3", "x_4", "x_5"], x_cols)
 
-        df_true_impact = scenario.true_impact(3)
-
-        self.assertTrue(
-            pd.DataFrame(
-                [
-                    [0.0, 1.0, 2_000.0, 3.0, 4_000.0, 5.0, 0.0],
-                    [100_000.0, 101.0, 102_000.0, 103.0, 104_000.0, 105.0, 0.0],
-                    [200_000.0, 201.0, 202_000.0, 203.0, 204_000.0, 205.0, 0.0],
-                ],
-                columns=["x_0", "x_1", "x_2", "x_3", "x_4", "x_5", "c_0"],
-            ).equals(df_true_impact)
-        )
-
         df_training_data = scenario.training_data(3)
 
         self.assertTrue(
@@ -229,6 +216,19 @@ class AdditiveFeatureTestCase(unittest.TestCase):
                 ],
                 columns=["y", "x_0", "x_1", "x_2", "x_3", "x_4", "x_5", "c_0"],
             ).equals(df_training_data)
+        )
+
+        df_true_impact = scenario.true_impact(3)
+
+        self.assertTrue(
+            pd.DataFrame(
+                [
+                    [-100_000.0, -100.0, -100_000.0, -100.0, -100_000.0, -100.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [100_000.0, 100.0, 100_000.0, 100.0, 100_000.0, 100.0, 0.0],
+                ],
+                columns=["x_0", "x_1", "x_2", "x_3", "x_4", "x_5", "c_0"],
+            ).equals(df_true_impact)
         )
 
 

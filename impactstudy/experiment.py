@@ -6,6 +6,7 @@ from functools import cache
 
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.axes import Axes
 from numpy.random import RandomState, default_rng
 import pandas as pd
 from sklearn.metrics import (
@@ -111,20 +112,32 @@ class LinearExactTargetGenerator(ExactTargetGenerator):
 
 
 class StepExactTargetGenerator(ExactTargetGenerator):
-    def __init__(self, step_at: float, step_size: float, step_base: float = 0.0):
+    def __init__(
+        self,
+        step_at: float,
+        step_size: float,
+        step_base: float = 0.0,
+        *,
+        step_down_at: Optional[float] = None,
+    ):
         self._step_at = step_at
         self._step_size = step_size
         self._step_base = step_base
+        self._step_down_at = step_down_at
 
     def arity(self) -> int:
         return 1
 
     def f(self, df_x: pd.DataFrame) -> pd.Series:
+        condition = df_x["x_0"] >= self._step_at
+        if self._step_down_at is not None:
+            condition = condition & (df_x["x_0"] < self._step_down_at)
+
         return pd.Series(
             np.where(
-                df_x["x_0"] < self._step_at,
-                self._step_base,
+                condition,
                 self._step_base + self._step_size,
+                self._step_base,
             ),
             index=df_x.index,
             name="f",
@@ -132,7 +145,7 @@ class StepExactTargetGenerator(ExactTargetGenerator):
 
     def impact(self, x: pd.DataFrame) -> pd.DataFrame:
         f = self.f(x)
-        df_impact = pd.DataFrame(f).rename({"f": "x_0"}, axis="columns")
+        df_impact = pd.DataFrame(f - f.mean()).rename({"f": "x_0"}, axis="columns")
         return df_impact
 
 
@@ -281,6 +294,10 @@ class Scenario:
         df_x, df_c = self._feature_generator(n)
 
         df_impact = self._target_generator.impact(df_x)
+
+        # Demean the impact of each feature.
+        df_impact = df_impact - df_impact.mean(axis="rows")
+
         for col in df_c.columns:
             df_impact[col] = 0.0
 
@@ -513,6 +530,7 @@ class Experiment(ABC):
     ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
         raise NotImplementedError("Not implemented on abstract class.")
 
+    @cache
     def model_errors(
         self, n: int, *, linreg_errors: Optional[bool] = False
     ) -> pd.DataFrame:
@@ -539,6 +557,50 @@ class Experiment(ABC):
                 for tags, scenario in self.scenarios()
             ]
         ).reset_index(drop=True)
+
+    def plot_model_errors(self, n: int, x_col: str, y_col: str, **kwargs) -> Axes:
+        df_model_errors = self.model_errors(n, linreg_errors=True)
+
+        ax = None
+
+        for ii, (name, df_group) in enumerate(
+            df_model_errors[~df_model_errors["metric"].str.startswith("LR_")].groupby(
+                "metric"
+            )
+        ):
+            ax = df_group.plot(
+                x_col, y_col, marker="o", c=f"C{ii}", ax=ax, label=name, **kwargs
+            )
+            lr_name = f"LR_{name}"
+            df_lr_group = df_model_errors[df_model_errors["metric"] == lr_name]
+            ax = df_lr_group.plot(
+                x_col,
+                y_col,
+                linestyle="dashed",
+                marker="d",
+                c=f"C{ii}",
+                ax=ax,
+                label=lr_name,
+            )
+
+        ax.grid()
+
+        return ax
+
+    def plot_r2(self, n: int, x_col: str, **kwargs) -> Axes:
+        df_model_errors = self.model_errors(n, linreg_errors=True)
+
+        df_r2 = df_model_errors[df_model_errors["metric"] == "RMSE"][
+            [x_col, "IM_R2", "LR_R2"]
+        ]
+
+        ax = df_r2.plot(x_col, "IM_R2", c="C0", marker="o", **kwargs)
+        ax = df_r2.plot(x_col, "LR_R2", c="C0", linestyle="dashed", marker="d", ax=ax)
+
+        ax.set_ylim(-0.1, 1.1)
+        ax.grid()
+
+        return ax
 
 
 class LinearWithNoiseExperiment(Experiment):
@@ -571,9 +633,8 @@ class LinearWithNoiseExperiment(Experiment):
                     feature_generator = UniformFeatureGenerator(
                         s=s, m=m, low=0.0, high=100.0, seed=self._seed
                     )
-
                     linear_exact_target_generator = LinearExactTargetGenerator(
-                        a=np.linspace(-1.0, 1.0, m), b=0.0
+                        a=np.linspace(-1.0, 1.0, m), b=20.0
                     )
                     target_generator = add_normal_noise(
                         linear_exact_target_generator,
@@ -593,6 +654,7 @@ class LinearAndStepWithNoiseExperiment(Experiment):
         m_step: int | Iterable[int],
         s: int | Iterable[int],
         sigma: int | float | Iterable[float],
+        *,
         seed: Optional[int] = 17,
     ):
         if isinstance(m_linear, int):
@@ -635,7 +697,10 @@ class LinearAndStepWithNoiseExperiment(Experiment):
                         if m_step > 0:
                             step_exact_target_generators = [
                                 StepExactTargetGenerator(
-                                    50.0, 100.0 - 10.0 * ii, -50.0 + 5.0 * ii
+                                    60.0,
+                                    60,
+                                    -30,
+                                    step_down_at=80.0 if (ii % 2 == 0) else None,
                                 )
                                 for ii in range(m_step)
                             ]
