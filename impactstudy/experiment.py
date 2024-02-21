@@ -124,10 +124,7 @@ class UnaryExactTargetGenerator(ExactTargetGenerator, metaclass=ABCMeta):
 
 class PolynomialExactTargetGenerator(UnaryExactTargetGenerator):
 
-    def __init__(
-        self,
-        coefficients: Iterable[float]
-    ):
+    def __init__(self, coefficients: Iterable[float]):
         self._poly = np.poly1d(np.array(coefficients))
 
     @property
@@ -135,7 +132,7 @@ class PolynomialExactTargetGenerator(UnaryExactTargetGenerator):
         return self._poly.coefficients
 
     def f(self, x: pd.DataFrame) -> pd.Series:
-        return pd.Series(self._poly(x).reshape(len(x.index)), index=x.index, name='f')
+        return pd.Series(self._poly(x).reshape(len(x.index)), index=x.index, name="f")
 
 
 class SinusoidalExactTargetGenerator(UnaryExactTargetGenerator):
@@ -151,8 +148,10 @@ class SinusoidalExactTargetGenerator(UnaryExactTargetGenerator):
         self._phase = phase
 
     def f(self, x: pd.DataFrame) -> pd.Series:
-        wave = self._amplitude * np.sin(2 * np.pi * (x['x_0'] - self._phase) / self._wavelength)
-        wave.name = 'f'
+        wave = self._amplitude * np.sin(
+            2 * np.pi * (x["x_0"] - self._phase) / self._wavelength
+        )
+        wave.name = "f"
         return wave
 
 
@@ -716,8 +715,7 @@ class SingleFeatureTypeWithNoiseExperiment(Experiment, metaclass=ABCMeta):
                         s=s, m=m, low=0.0, high=100.0, seed=self._seed
                     )
                     quadratic_target_generators = [
-                        self.individual_target_generator(ii)
-                        for ii in range(m)
+                        self.individual_target_generator(ii) for ii in range(m)
                     ]
                     target_generator = add_normal_noise(
                         AdditiveExactTargetGenerator(quadratic_target_generators),
