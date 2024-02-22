@@ -262,7 +262,7 @@ class KitchenSinkTestCase(unittest.TestCase):
     def test_split(self):
         for m_total in range(1, 21):
             experiment = ise.KitchenSinkExperiment(
-                m=m_total, s=0, sigma=20.0, total_scenarios=20, n=100
+                m=m_total, s=0, sigma=20.0, n=100
             )
             ms = experiment.ms
 
