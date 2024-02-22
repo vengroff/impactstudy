@@ -61,6 +61,30 @@ class StepTest(unittest.TestCase):
         self.assertTrue(df_expected_impact.equals(df_impact))
 
 
+class PolyTest(unittest.TestCase):
+
+    def test_quadratic(self):
+        target_generator = ise.PolynomialExactTargetGenerator([1.0, 0.0, 10.0])
+
+        self.assertTrue(
+            (np.array([1.0, 0.0, 10]) == target_generator.coefficients).all()
+        )
+
+        df = pd.DataFrame([[0.0], [1.0], [2.0], [3.0]], columns=["x_0"])
+
+        y = target_generator.f(df)
+        df_impact = target_generator.impact(df)
+
+        expected_f = pd.Series([10.0, 11.0, 14.0, 19.0])
+
+        df_expected_impact = pd.DataFrame(
+            [[-3.5], [-2.5], [0.5], [5.5]], columns=["x_0"]
+        )
+
+        self.assertTrue(expected_f.equals(y))
+        self.assertTrue(df_expected_impact.equals(df_impact))
+
+
 def linear_normal_target_generator(
     a: np.array, b: float, sigma: float, seed: int | RandomState = 17
 ) -> ise.TargetGenerator:
@@ -230,6 +254,18 @@ class AdditiveFeatureTestCase(unittest.TestCase):
                 columns=["x_0", "x_1", "x_2", "x_3", "x_4", "x_5", "c_0"],
             ).equals(df_true_impact)
         )
+
+
+class KitchenSinkTestCase(unittest.TestCase):
+
+    def test_split(self):
+        for m_total in range(1, 21):
+            experiment = ise.KitchenSinkExperiment(
+                m=m_total, s=0, sigma=20.0, total_scenarios=20
+            )
+            ms = experiment.ms
+
+            self.assertEqual(m_total, sum(ms))
 
 
 if __name__ == "__main__":

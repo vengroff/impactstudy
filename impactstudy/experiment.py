@@ -1,6 +1,6 @@
 """Experiments."""
 
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, ABCMeta
 from typing import Tuple, List, Dict, Generator, Iterable, Optional
 from functools import cache
 
@@ -10,7 +10,7 @@ from matplotlib.axes import Axes
 from numpy.random import RandomState, default_rng
 import pandas as pd
 from sklearn.metrics import (
-    mean_squared_error,
+    root_mean_squared_error,
     mean_absolute_error,
     median_absolute_error,
 )
@@ -111,7 +111,61 @@ class LinearExactTargetGenerator(ExactTargetGenerator):
         return impact
 
 
-class StepExactTargetGenerator(ExactTargetGenerator):
+class UnaryExactTargetGenerator(ExactTargetGenerator, metaclass=ABCMeta):
+
+    def arity(self) -> int:
+        return 1
+
+    def impact(self, x: pd.DataFrame) -> pd.DataFrame:
+        f = self.f(x)
+        df_impact = pd.DataFrame(f - f.mean()).rename({"f": "x_0"}, axis="columns")
+        return df_impact
+
+
+class PolynomialExactTargetGenerator(UnaryExactTargetGenerator):
+
+    def __init__(self, coefficients: Iterable[float]):
+        self._poly = np.poly1d(np.array(coefficients))
+
+    @property
+    def coefficients(self) -> np.array:
+        return self._poly.coefficients
+
+    def f(self, x: pd.DataFrame) -> pd.Series:
+        return pd.Series(self._poly(x).reshape(len(x.index)), index=x.index, name="f")
+
+
+class ExponentialExactTargetGenerator(UnaryExactTargetGenerator):
+
+    def __init__(self, k: float, alpha: float):
+        self._k = k
+        self._alpha = alpha
+
+    def f(self, x: pd.DataFrame) -> pd.Series:
+        return np.exp(self._k * x["x_0"] - self._alpha)
+
+
+class SinusoidalExactTargetGenerator(UnaryExactTargetGenerator):
+
+    def __init__(
+        self,
+        amplitude: float,
+        wavelength: float,
+        phase: float = 0,
+    ):
+        self._amplitude = amplitude
+        self._wavelength = wavelength
+        self._phase = phase
+
+    def f(self, x: pd.DataFrame) -> pd.Series:
+        wave = self._amplitude * np.sin(
+            2 * np.pi * (x["x_0"] - self._phase) / self._wavelength
+        )
+        wave.name = "f"
+        return wave
+
+
+class StepExactTargetGenerator(UnaryExactTargetGenerator):
     def __init__(
         self,
         step_at: float,
@@ -124,9 +178,6 @@ class StepExactTargetGenerator(ExactTargetGenerator):
         self._step_size = step_size
         self._step_base = step_base
         self._step_down_at = step_down_at
-
-    def arity(self) -> int:
-        return 1
 
     def f(self, df_x: pd.DataFrame) -> pd.Series:
         condition = df_x["x_0"] >= self._step_at
@@ -142,11 +193,6 @@ class StepExactTargetGenerator(ExactTargetGenerator):
             index=df_x.index,
             name="f",
         )
-
-    def impact(self, x: pd.DataFrame) -> pd.DataFrame:
-        f = self.f(x)
-        df_impact = pd.DataFrame(f - f.mean()).rename({"f": "x_0"}, axis="columns")
-        return df_impact
 
 
 def add_normal_noise(
@@ -372,15 +418,13 @@ class Scenario:
         if df_model_impact is None:
             df_model_impact = self.model_mean_impact(n)
 
-        df_rmse = np.sqrt(
-            pd.DataFrame(
-                [
-                    mean_squared_error(
-                        df_true_impact, df_model_impact, multioutput="raw_values"
-                    )
-                ],
-                columns=df_true_impact.columns,
-            )
+        df_rmse = pd.DataFrame(
+            [
+                root_mean_squared_error(
+                    df_true_impact, df_model_impact, multioutput="raw_values"
+                )
+            ],
+            columns=df_true_impact.columns,
         )
 
         return df_rmse
@@ -646,6 +690,76 @@ class LinearWithNoiseExperiment(Experiment):
                     yield {"m": m, "s": s, "sigma": sigma}, scenario
 
 
+class SingleFeatureTypeWithNoiseExperiment(Experiment, metaclass=ABCMeta):
+
+    @abstractmethod
+    def individual_target_generator(ii: int) -> UnaryExactTargetGenerator:
+        raise NotImplementedError("Not implemented on abstract class.")
+
+    def __init__(
+        self,
+        m: int | Iterable[int],
+        s: int | Iterable[int],
+        sigma: int | float | Iterable[float],
+        seed: Optional[int] = 17,
+    ):
+        if isinstance(m, int):
+            m = [m]
+        if isinstance(s, int):
+            s = [s]
+        if isinstance(sigma, (int, float)):
+            sigma = [sigma]
+
+        self._m = m
+        self._s = s
+        self._sigma = sigma
+        self._seed = seed
+
+    def scenarios(
+        self,
+    ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
+        for sigma in self._sigma:
+            for m in self._m:
+                for s in self._s:
+                    feature_generator = UniformFeatureGenerator(
+                        s=s, m=m, low=0.0, high=100.0, seed=self._seed
+                    )
+                    quadratic_target_generators = [
+                        self.individual_target_generator(ii) for ii in range(m)
+                    ]
+                    target_generator = add_normal_noise(
+                        AdditiveExactTargetGenerator(quadratic_target_generators),
+                        sigma,
+                        seed=(17 * self._seed) % 0x7FFFFFFF,
+                    )
+                    scenario = Scenario(feature_generator, target_generator)
+                    yield {"m": m, "s": s, "sigma": sigma}, scenario
+
+
+class QuadraticWithNoiseExperiment(SingleFeatureTypeWithNoiseExperiment):
+
+    def individual_target_generator(self, ii: int) -> UnaryExactTargetGenerator:
+        return PolynomialExactTargetGenerator([0.01, -1.0, 10.0])
+
+
+class CubicWithNoiseExperiment(SingleFeatureTypeWithNoiseExperiment):
+
+    def individual_target_generator(self, ii: int) -> UnaryExactTargetGenerator:
+        return PolynomialExactTargetGenerator([0.0002, -0.01, -2.0, 50.0])
+
+
+class SinusoidalWithNoiseExperiment(SingleFeatureTypeWithNoiseExperiment):
+
+    def individual_target_generator(self, ii: int) -> UnaryExactTargetGenerator:
+        return SinusoidalExactTargetGenerator(70, 50, 20)
+
+
+class ExponentialWithNoiseExperiment(SingleFeatureTypeWithNoiseExperiment):
+
+    def individual_target_generator(self, ii: int) -> UnaryExactTargetGenerator:
+        return ExponentialExactTargetGenerator(k=0.1, alpha=5.0)
+
+
 class LinearAndStepWithNoiseExperiment(Experiment):
 
     def __init__(
@@ -735,3 +849,94 @@ class LinearAndStepWithNoiseExperiment(Experiment):
                             "s": s,
                             "sigma": sigma,
                         }, scenario
+
+
+class KitchenSinkExperiment(Experiment):
+
+    def __init__(
+        self,
+        m: int,
+        s: int,
+        total_scenarios: int,
+        sigma: float,
+        *,
+        seed: int = 0x1734CE6F,
+    ):
+        self._m = m
+        self._s = s
+        self._total_scenarios = total_scenarios
+        self._sigma = sigma
+
+        self._seed = seed
+
+        np.random.seed(seed)
+        ends = sorted(np.random.choice(np.array(range(m)), size=4, replace=True)) + [m]
+        self._sub_ms = ends[:1] + [ends[ii + 1] - ends[ii] for ii in range(4)]
+
+    @property
+    def ms(self) -> np.array:
+        return self._sub_ms
+
+    def scenarios(
+        self,
+    ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
+
+        for _ in range(self._total_scenarios):
+
+            feature_generator = UniformFeatureGenerator(
+                s=self._s,
+                m=self._m,
+                low=0.0,
+                high=100.0,
+                seed=self._seed,
+            )
+
+            exact_target_generator = AdditiveExactTargetGenerator(
+                # Linear
+                [
+                    LinearExactTargetGenerator(
+                        a=np.linspace(-1.0, 1.0, self._sub_ms[0]), b=20.0
+                    )
+                ]
+                +
+                # Quadratic
+                [
+                    PolynomialExactTargetGenerator([-0.03, 1.0, 90.0])
+                    for _ in range(self._sub_ms[1])
+                ]
+                +
+                # Cubic
+                [
+                    PolynomialExactTargetGenerator([0.0003, -0.01, -2.0, 50.0])
+                    for _ in range(self._sub_ms[2])
+                ]
+                +
+                # Sinusoidal
+                [
+                    SinusoidalExactTargetGenerator(70, 50, 20)
+                    for _ in range(self._sub_ms[3])
+                ]
+                +
+                # Exponential
+                [
+                    ExponentialExactTargetGenerator(k=0.1, alpha=5.0)
+                    for _ in range(self._sub_ms[4])
+                ]
+            )
+
+            target_generator = add_normal_noise(
+                exact_target_generator,
+                self._sigma,
+                seed=(17 * self._seed) % 0x7FFFFFFF,
+            )
+
+            scenario = Scenario(feature_generator, target_generator)
+            yield {
+                "m_linear": self._sub_ms[0],
+                "m_quadratic": self._sub_ms[1],
+                "m_cubic": self._sub_ms[2],
+                "m_sinusoidal": self._sub_ms[3],
+                "m_exponential": self._sub_ms[4],
+                "s": self._s,
+                "sigma": self._sigma,
+            }, scenario
