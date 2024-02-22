@@ -256,5 +256,17 @@ class AdditiveFeatureTestCase(unittest.TestCase):
         )
 
 
+class KitchenSinkTestCase(unittest.TestCase):
+
+    def test_split(self):
+        for m_total in range(1, 21):
+            experiment = ise.KitchenSinkExperiment(m=m_total, s=0, total_scenarios=20)
+            ms = experiment.ms
+
+            print("\nMMM\n", ms)
+
+            self.assertEqual(m_total, sum(ms))
+
+
 if __name__ == "__main__":
     unittest.main()
