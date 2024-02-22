@@ -305,12 +305,14 @@ class Scenario:
         self,
         feature_generator: FeatureGenerator,
         target_generator: TargetGenerator,
+        n: int,
         *,
         impact_model_seed: int = 0x17E3FB61,
     ):
         self._feature_generator = feature_generator
         self._target_generator = target_generator
         self._impact_model_seed = impact_model_seed
+        self._n = n
 
     def x_cols(self) -> List[str]:
         return self._feature_generator.x_cols()
@@ -324,8 +326,8 @@ class Scenario:
     def y_col(self) -> str:
         return "y"
 
-    def training_data(self, n: int) -> pd.DataFrame:
-        df_x, df_c = self._feature_generator(n)
+    def training_data(self) -> pd.DataFrame:
+        df_x, df_c = self._feature_generator(self._n)
         y = self._target_generator.f_prime(df_x, df_c)
 
         df_y = pd.DataFrame()
@@ -336,8 +338,8 @@ class Scenario:
         return df
 
     @cache
-    def true_impact(self, n: int) -> pd.DataFrame:
-        df_x, df_c = self._feature_generator(n)
+    def true_impact(self) -> pd.DataFrame:
+        df_x, df_c = self._feature_generator(self._n)
 
         df_impact = self._target_generator.impact(df_x)
 
@@ -350,8 +352,8 @@ class Scenario:
         return df_impact
 
     @cache
-    def impact_model(self, n: int) -> ImpactModel:
-        df = self.training_data(n)
+    def impact_model(self) -> ImpactModel:
+        df = self.training_data()
 
         df_X_prime = df[self.x_prime_cols()]
         y = df[self.y_col()]
@@ -362,20 +364,20 @@ class Scenario:
         return impact_model
 
     @cache
-    def model_mean_impact(self, n: int) -> pd.DataFrame:
-        impact_model = self.impact_model(n)
+    def model_mean_impact(self) -> pd.DataFrame:
+        impact_model = self.impact_model()
 
-        df = self.training_data(n)
+        df = self.training_data()
         df_X_prime = df[self.x_prime_cols()]
 
         return impact_model.mean_impact(df_X_prime)
 
     def model_impact_charts(
-        self, n: int, linreg_overlay: bool = False
+        self, linreg_overlay: bool = False
     ) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
-        impact_model = self.impact_model(n)
+        impact_model = self.impact_model()
 
-        df = self.training_data(n)
+        df = self.training_data()
         df_X_prime = df[self.x_prime_cols()]
 
         impact_charts = impact_model.impact_charts(
@@ -383,7 +385,7 @@ class Scenario:
             subplots_kwargs=dict(figsize=(12, 8)),
         )
 
-        df_true_impact = self.true_impact(n)
+        df_true_impact = self.true_impact()
 
         for col in df_true_impact.columns:
             fig, ax = impact_charts[col]
@@ -398,7 +400,7 @@ class Scenario:
             )
 
             if linreg_overlay:
-                df_linreg_impact = self.linreg_impact(n, col)
+                df_linreg_impact = self.linreg_impact(col)
                 ax.scatter(
                     df_linreg_impact[col],
                     df_linreg_impact["y_hat"],
@@ -412,11 +414,11 @@ class Scenario:
         return impact_charts
 
     def root_mean_squared_error(
-        self, n: int, df_model_impact: Optional[pd.DataFrame] = None
+        self, df_model_impact: Optional[pd.DataFrame] = None
     ) -> pd.DataFrame:
-        df_true_impact = self.true_impact(n)
+        df_true_impact = self.true_impact()
         if df_model_impact is None:
-            df_model_impact = self.model_mean_impact(n)
+            df_model_impact = self.model_mean_impact()
 
         df_rmse = pd.DataFrame(
             [
@@ -430,11 +432,11 @@ class Scenario:
         return df_rmse
 
     def mean_absolute_error(
-        self, n: int, df_model_impact: Optional[pd.DataFrame] = None
+        self, df_model_impact: Optional[pd.DataFrame] = None
     ) -> pd.DataFrame:
-        df_true_impact = self.true_impact(n)
+        df_true_impact = self.true_impact()
         if df_model_impact is None:
-            df_model_impact = self.model_mean_impact(n)
+            df_model_impact = self.model_mean_impact()
 
         df_mae = pd.DataFrame(
             [
@@ -448,11 +450,11 @@ class Scenario:
         return df_mae
 
     def median_absolute_error(
-        self, n: int, df_model_impact: Optional[pd.DataFrame] = None
+        self, df_model_impact: Optional[pd.DataFrame] = None
     ) -> pd.DataFrame:
-        df_true_impact = self.true_impact(n)
+        df_true_impact = self.true_impact()
         if df_model_impact is None:
-            df_model_impact = self.model_mean_impact(n)
+            df_model_impact = self.model_mean_impact()
 
         df_mae = pd.DataFrame(
             [
@@ -465,21 +467,21 @@ class Scenario:
 
         return df_mae
 
-    def model_errors(self, n: int, *, linreg_errors: bool = False) -> pd.DataFrame:
-        df_rmse = self.root_mean_squared_error(n)
-        df_mae = self.mean_absolute_error(n)
-        df_medae = self.median_absolute_error(n)
+    def model_errors(self, *, linreg_errors: bool = False) -> pd.DataFrame:
+        df_rmse = self.root_mean_squared_error()
+        df_mae = self.mean_absolute_error()
+        df_medae = self.median_absolute_error()
 
         df_rmse["metric"] = "RMSE"
         df_mae["metric"] = "MAE"
         df_medae["metric"] = "MED_AE"
 
         if linreg_errors:
-            df_linreg_impact = self.linreg_impacts(n)
+            df_linreg_impact = self.linreg_impacts()
 
-            df_linreg_rmse = self.root_mean_squared_error(n, df_linreg_impact)
-            df_linreg_mae = self.mean_absolute_error(n, df_linreg_impact)
-            df_linreg_medae = self.median_absolute_error(n, df_linreg_impact)
+            df_linreg_rmse = self.root_mean_squared_error(df_linreg_impact)
+            df_linreg_mae = self.mean_absolute_error(df_linreg_impact)
+            df_linreg_medae = self.median_absolute_error(df_linreg_impact)
 
             df_linreg_rmse["metric"] = "LR_RMSE"
             df_linreg_mae["metric"] = "LR_MAE"
@@ -512,33 +514,33 @@ class Scenario:
 
         return df_errors
 
-    def model_r2(self, n: int) -> float:
-        return self.impact_model(n).r2_
+    def model_r2(self) -> float:
+        return self.impact_model().r2_
 
     @cache
-    def linreg_model(self, n: int) -> LinearRegression:
+    def linreg_model(self) -> LinearRegression:
         linreg = LinearRegression()
 
-        df_training = self.training_data(n)
+        df_training = self.training_data()
 
         linreg.fit(df_training[self.x_prime_cols()], df_training[self.y_col()])
 
         return linreg
 
-    def y_hat_linreg(self, n: int) -> pd.Series:
-        return self.linreg_model(n).predict(self.training_data(n)[self.x_prime_cols()])
+    def y_hat_linreg(self) -> pd.Series:
+        return self.linreg_model().predict(self.training_data()[self.x_prime_cols()])
 
-    def linreg_r2(self, n: int) -> float:
-        df_training = self.training_data(n)
+    def linreg_r2(self) -> float:
+        df_training = self.training_data()
 
-        return self.linreg_model(n).score(
+        return self.linreg_model().score(
             df_training[self.x_prime_cols()], df_training[self.y_col()]
         )
 
-    def linreg_impacts(self, n: int) -> pd.DataFrame:
+    def linreg_impacts(self) -> pd.DataFrame:
         df_linreg_impacts = pd.concat(
             (
-                self.linreg_impact(n, feature)["y_hat"].rename(feature)
+                self.linreg_impact(feature)["y_hat"].rename(feature)
                 for feature in self.x_prime_cols()
             ),
             axis="columns",
@@ -546,11 +548,11 @@ class Scenario:
 
         return df_linreg_impacts
 
-    def linreg_impact(self, n: int, feature: str) -> pd.DataFrame:
+    def linreg_impact(self, feature: str) -> pd.DataFrame:
         # Create a data frame that has the mean value for every
         # column except the feature we are interested in, where
         # the values remain the original.
-        df_training = self.training_data(n)
+        df_training = self.training_data()
 
         df_mean_x_prime = df_training[self.x_prime_cols()].copy()
         for col in df_mean_x_prime.columns:
@@ -559,9 +561,7 @@ class Scenario:
 
         mean_y = df_training[self.y_col()].mean()
 
-        df_mean_x_prime["y_hat"] = (
-            self.linreg_model(n).predict(df_mean_x_prime) - mean_y
-        )
+        df_mean_x_prime["y_hat"] = self.linreg_model().predict(df_mean_x_prime) - mean_y
 
         return df_mean_x_prime[[feature, "y_hat"]]
 
@@ -575,18 +575,16 @@ class Experiment(ABC):
         raise NotImplementedError("Not implemented on abstract class.")
 
     @cache
-    def model_errors(
-        self, n: int, *, linreg_errors: Optional[bool] = False
-    ) -> pd.DataFrame:
+    def model_errors(self, *, linreg_errors: Optional[bool] = False) -> pd.DataFrame:
         def scenario_errors() -> Generator[pd.DataFrame, None, None]:
             for tags, scenario in self.scenarios():
                 df_scenario_model_errors = scenario.model_errors(
-                    n, linreg_errors=linreg_errors
+                    linreg_errors=linreg_errors
                 )
                 for k, v in tags.items():
                     df_scenario_model_errors[k] = v
-                df_scenario_model_errors["IM_R2"] = scenario.model_r2(n)
-                df_scenario_model_errors["LR_R2"] = scenario.linreg_r2(n)
+                df_scenario_model_errors["IM_R2"] = scenario.model_r2()
+                df_scenario_model_errors["LR_R2"] = scenario.linreg_r2()
 
                 yield df_scenario_model_errors
 
@@ -594,16 +592,16 @@ class Experiment(ABC):
 
         return df_model_errors
 
-    def scores(self, n: int) -> pd.DataFrame:
+    def scores(self) -> pd.DataFrame:
         return pd.DataFrame(
             [
-                dict(IM_R2=scenario.model_r2(n), LR_R2=scenario.linreg_r2(n), **tags)
+                dict(IM_R2=scenario.model_r2(), LR_R2=scenario.linreg_r2(), **tags)
                 for tags, scenario in self.scenarios()
             ]
         ).reset_index(drop=True)
 
-    def plot_model_errors(self, n: int, x_col: str, y_col: str, **kwargs) -> Axes:
-        df_model_errors = self.model_errors(n, linreg_errors=True)
+    def plot_model_errors(self, x_col: str, y_col: str, **kwargs) -> Axes:
+        df_model_errors = self.model_errors(linreg_errors=True)
 
         ax = None
 
@@ -631,8 +629,8 @@ class Experiment(ABC):
 
         return ax
 
-    def plot_r2(self, n: int, x_col: str, **kwargs) -> Axes:
-        df_model_errors = self.model_errors(n, linreg_errors=True)
+    def plot_r2(self, x_col: str, **kwargs) -> Axes:
+        df_model_errors = self.model_errors(linreg_errors=True)
 
         df_r2 = df_model_errors[df_model_errors["metric"] == "RMSE"][
             [x_col, "IM_R2", "LR_R2"]
@@ -654,6 +652,7 @@ class LinearWithNoiseExperiment(Experiment):
         m: int | Iterable[int],
         s: int | Iterable[int],
         sigma: int | float | Iterable[float],
+        n: int,
         seed: Optional[int] = 17,
     ):
         if isinstance(m, int):
@@ -666,6 +665,9 @@ class LinearWithNoiseExperiment(Experiment):
         self._m = m
         self._s = s
         self._sigma = sigma
+
+        self._n = n
+
         self._seed = seed
 
     def scenarios(
@@ -686,7 +688,7 @@ class LinearWithNoiseExperiment(Experiment):
                         seed=(17 * self._seed) % 0x7FFFFFFF,
                     )
 
-                    scenario = Scenario(feature_generator, target_generator)
+                    scenario = Scenario(feature_generator, target_generator, self._n)
                     yield {"m": m, "s": s, "sigma": sigma}, scenario
 
 
@@ -701,6 +703,7 @@ class SingleFeatureTypeWithNoiseExperiment(Experiment, metaclass=ABCMeta):
         m: int | Iterable[int],
         s: int | Iterable[int],
         sigma: int | float | Iterable[float],
+        n: int,
         seed: Optional[int] = 17,
     ):
         if isinstance(m, int):
@@ -713,6 +716,9 @@ class SingleFeatureTypeWithNoiseExperiment(Experiment, metaclass=ABCMeta):
         self._m = m
         self._s = s
         self._sigma = sigma
+
+        self._n = n
+
         self._seed = seed
 
     def scenarios(
@@ -732,7 +738,7 @@ class SingleFeatureTypeWithNoiseExperiment(Experiment, metaclass=ABCMeta):
                         sigma,
                         seed=(17 * self._seed) % 0x7FFFFFFF,
                     )
-                    scenario = Scenario(feature_generator, target_generator)
+                    scenario = Scenario(feature_generator, target_generator, self._n)
                     yield {"m": m, "s": s, "sigma": sigma}, scenario
 
 
@@ -768,6 +774,7 @@ class LinearAndStepWithNoiseExperiment(Experiment):
         m_step: int | Iterable[int],
         s: int | Iterable[int],
         sigma: int | float | Iterable[float],
+        n: int,
         *,
         seed: Optional[int] = 17,
     ):
@@ -784,6 +791,9 @@ class LinearAndStepWithNoiseExperiment(Experiment):
         self._m_step = m_step
         self._s = s
         self._sigma = sigma
+
+        self._n = n
+
         self._seed = seed
 
     def scenarios(
@@ -842,7 +852,9 @@ class LinearAndStepWithNoiseExperiment(Experiment):
                             seed=(17 * self._seed) % 0x7FFFFFFF,
                         )
 
-                        scenario = Scenario(feature_generator, target_generator)
+                        scenario = Scenario(
+                            feature_generator, target_generator, self._n
+                        )
                         yield {
                             "m_linear": m_linear,
                             "m_step": m_step,
@@ -857,15 +869,19 @@ class KitchenSinkExperiment(Experiment):
         self,
         m: int,
         s: int,
-        total_scenarios: int,
-        sigma: float,
+        sigma: float | Iterable[float],
+        n: int,
         *,
         seed: int = 0x1734CE6F,
     ):
+        if isinstance(sigma, float):
+            sigma = [sigma]
+
         self._m = m
         self._s = s
-        self._total_scenarios = total_scenarios
         self._sigma = sigma
+
+        self._n = n
 
         self._seed = seed
 
@@ -881,7 +897,7 @@ class KitchenSinkExperiment(Experiment):
         self,
     ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
 
-        for _ in range(self._total_scenarios):
+        for sigma in self._sigma:
 
             feature_generator = UniformFeatureGenerator(
                 s=self._s,
@@ -926,11 +942,12 @@ class KitchenSinkExperiment(Experiment):
 
             target_generator = add_normal_noise(
                 exact_target_generator,
-                self._sigma,
+                sigma,
                 seed=(17 * self._seed) % 0x7FFFFFFF,
             )
 
-            scenario = Scenario(feature_generator, target_generator)
+            scenario = Scenario(feature_generator, target_generator, self._n)
+
             yield {
                 "m_linear": self._sub_ms[0],
                 "m_quadratic": self._sub_ms[1],
@@ -938,5 +955,5 @@ class KitchenSinkExperiment(Experiment):
                 "m_sinusoidal": self._sub_ms[3],
                 "m_exponential": self._sub_ms[4],
                 "s": self._s,
-                "sigma": self._sigma,
+                "sigma": sigma,
             }, scenario

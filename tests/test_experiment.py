@@ -165,16 +165,15 @@ class UniformFeatureGeneratorTestCase(unittest.TestCase):
 class ScenarioGeneratorTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
+        self.n = 100
         fg = ise.UniformFeatureGenerator(2, 2, low=0.0, high=100.0)
         tg = linear_normal_target_generator([0.5, -1.0], 0.0, 10.0)
-        self.sg = ise.Scenario(fg, tg)
+        self.sg = ise.Scenario(fg, tg, self.n)
 
     def test_scenario(self):
-        n = 100
+        df_scenario = self.sg.training_data()
 
-        df_scenario = self.sg.training_data(n)
-
-        self.assertEqual((n, 5), df_scenario.shape)
+        self.assertEqual((self.n, 5), df_scenario.shape)
 
 
 class MockFeatureGenerator(ise.FeatureGenerator):
@@ -209,6 +208,8 @@ class MockTwoColumnTargetGenerator(ise.ExactTargetGenerator):
 class AdditiveFeatureTestCase(unittest.TestCase):
 
     def test_additive_feature(self):
+        n = 3
+
         feature_generator = MockFeatureGenerator(6)
 
         additive_target_generator = ise.AdditiveExactTargetGenerator(
@@ -222,14 +223,14 @@ class AdditiveFeatureTestCase(unittest.TestCase):
         self.assertEqual(6, additive_target_generator.arity())
 
         scenario = ise.Scenario(
-            feature_generator, ise.TargetGenerator(additive_target_generator)
+            feature_generator, ise.TargetGenerator(additive_target_generator), n
         )
 
         x_cols = scenario.x_cols()
 
         self.assertEqual(["x_0", "x_1", "x_2", "x_3", "x_4", "x_5"], x_cols)
 
-        df_training_data = scenario.training_data(3)
+        df_training_data = scenario.training_data()
 
         self.assertTrue(
             pd.DataFrame(
@@ -242,7 +243,7 @@ class AdditiveFeatureTestCase(unittest.TestCase):
             ).equals(df_training_data)
         )
 
-        df_true_impact = scenario.true_impact(3)
+        df_true_impact = scenario.true_impact()
 
         self.assertTrue(
             pd.DataFrame(
@@ -260,9 +261,7 @@ class KitchenSinkTestCase(unittest.TestCase):
 
     def test_split(self):
         for m_total in range(1, 21):
-            experiment = ise.KitchenSinkExperiment(
-                m=m_total, s=0, sigma=20.0, total_scenarios=20
-            )
+            experiment = ise.KitchenSinkExperiment(m=m_total, s=0, sigma=20.0, n=100)
             ms = experiment.ms
 
             self.assertEqual(m_total, sum(ms))
