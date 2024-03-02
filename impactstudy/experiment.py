@@ -111,6 +111,24 @@ class LinearExactTargetGenerator(ExactTargetGenerator):
         return impact
 
 
+class ProductExactTargetGenerator(ExactTargetGenerator):
+
+    def __init__(self, a: float):
+        self._a = a
+
+    def arity(self) -> int:
+        return 2
+
+    def f(self, x: pd.DataFrame) -> pd.DataFrame:
+        return self._a * x["x_0"] * x["x_1"]
+
+    def impact(self, x: pd.DataFrame) -> pd.DataFrame:
+        df_impact = self._a * x
+        df_impact["x_0"] = df_impact["x_0"] * x["x_1"].mean()
+        df_impact["x_1"] = df_impact["x_1"] * x["x_0"].mean()
+        return df_impact
+
+
 class UnaryExactTargetGenerator(ExactTargetGenerator, metaclass=ABCMeta):
 
     def arity(self) -> int:
@@ -299,6 +317,30 @@ class UniformFeatureGenerator(FeatureGenerator):
         return df_x, df_c
 
 
+class NormalFeatureGenerator(FeatureGenerator):
+    def __init__(
+        self,
+        m: int,
+        s: int,
+        mu: float,
+        sigma: float,
+        seed: int | RandomState = 17,
+    ):
+        super().__init__(m=m, s=s, seed=seed)
+        self._mu = mu
+        self._sigma = sigma
+
+    @cache
+    def __call__(self, n: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        x = self._rng.normal(loc=self._mu, scale=self._sigma, size=(n, self._m))
+        c = self._rng.normal(loc=self._mu, scale=self._sigma, size=(n, self._s))
+
+        df_x = pd.DataFrame(x, columns=self.x_cols())
+        df_c = pd.DataFrame(c, columns=self.c_cols())
+
+        return df_x, df_c
+
+
 class Scenario:
 
     def __init__(
@@ -428,6 +470,16 @@ class Scenario:
             ],
             columns=df_true_impact.columns,
         )
+
+        # We could do something like this:
+        #
+        #     df_rmse['mu_x_i'] = root_mean_squared_error(
+        #         df_true_impact, df_model_impact, multioutput="uniform_average"
+        #     )
+        #
+        # but we get the same number across this and other metrics by computing
+        # the mean of the raw values at a higher level. We want to see both but
+        # root_mean_squared error doesn't have a multipout= option that lets us.
 
         return df_rmse
 
@@ -568,11 +620,33 @@ class Scenario:
 
 class Experiment(ABC):
 
+    def __init__(self, feature_distribution: str):
+        known_distributions = ["uniform", "normal"]
+
+        if feature_distribution not in known_distributions:
+            raise ValueError(
+                f"Feature distribution {feature_distribution} is not one of {known_distributions}."
+            )
+
+        self._feature_distribution = feature_distribution
+
     @abstractmethod
     def scenarios(
         self,
     ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
         raise NotImplementedError("Not implemented on abstract class.")
+
+    def _feature_generator_for_scenario(
+        self, m: int, s: int, seed: int
+    ) -> FeatureGenerator:
+        if self._feature_distribution == "uniform":
+            return UniformFeatureGenerator(s=s, m=m, low=0.0, high=100.0, seed=seed)
+        elif self._feature_distribution == "normal":
+            return NormalFeatureGenerator(s=s, m=m, mu=50.0, sigma=20.0, seed=seed)
+        else:
+            raise ValueError(
+                f"Unknown feature distribution {self._feature_distribution}."
+            )
 
     @cache
     def model_errors(self, *, linreg_errors: Optional[bool] = False) -> pd.DataFrame:
@@ -654,7 +728,11 @@ class LinearWithNoiseExperiment(Experiment):
         sigma: int | float | Iterable[float],
         n: int,
         seed: Optional[int] = 17,
+        *,
+        feature_distribution: str = "normal",
     ):
+        super().__init__(feature_distribution=feature_distribution)
+
         if isinstance(m, int):
             m = [m]
         if isinstance(s, int):
@@ -676,8 +754,8 @@ class LinearWithNoiseExperiment(Experiment):
         for sigma in self._sigma:
             for m in self._m:
                 for s in self._s:
-                    feature_generator = UniformFeatureGenerator(
-                        s=s, m=m, low=0.0, high=100.0, seed=self._seed
+                    feature_generator = self._feature_generator_for_scenario(
+                        s=s, m=m, seed=self._seed
                     )
                     linear_exact_target_generator = LinearExactTargetGenerator(
                         a=np.linspace(-1.0, 1.0, m), b=20.0
@@ -690,6 +768,46 @@ class LinearWithNoiseExperiment(Experiment):
 
                     scenario = Scenario(feature_generator, target_generator, self._n)
                     yield {"m": m, "s": s, "sigma": sigma}, scenario
+
+
+class ProductWithNoiseExperiment(Experiment):
+
+    def __init__(
+        self,
+        sigma: int | float | Iterable[float],
+        n: int,
+        seed: Optional[int] = 17,
+        *,
+        feature_distribution: str = "normal",
+    ):
+        super().__init__(feature_distribution=feature_distribution)
+
+        if isinstance(sigma, (int, float)):
+            sigma = [sigma]
+
+        self._sigma = sigma
+
+        self._n = n
+
+        self._seed = seed
+
+    def scenarios(
+        self,
+    ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
+        for sigma in self._sigma:
+            feature_generator = self._feature_generator_for_scenario(
+                s=2, m=2, seed=self._seed
+            )
+            product_target_generator = ProductExactTargetGenerator(a=0.01)
+
+            target_generator = add_normal_noise(
+                product_target_generator,
+                sigma,
+                seed=(17 * self._seed) % 0x7FFFFFFF,
+            )
+
+            scenario = Scenario(feature_generator, target_generator, self._n)
+            yield {"sigma": sigma}, scenario
 
 
 class SingleFeatureTypeWithNoiseExperiment(Experiment, metaclass=ABCMeta):
@@ -705,7 +823,11 @@ class SingleFeatureTypeWithNoiseExperiment(Experiment, metaclass=ABCMeta):
         sigma: int | float | Iterable[float],
         n: int,
         seed: Optional[int] = 17,
+        *,
+        feature_distribution: str = "normal",
     ):
+        super().__init__(feature_distribution=feature_distribution)
+
         if isinstance(m, int):
             m = [m]
         if isinstance(s, int):
@@ -727,8 +849,8 @@ class SingleFeatureTypeWithNoiseExperiment(Experiment, metaclass=ABCMeta):
         for sigma in self._sigma:
             for m in self._m:
                 for s in self._s:
-                    feature_generator = UniformFeatureGenerator(
-                        s=s, m=m, low=0.0, high=100.0, seed=self._seed
+                    feature_generator = self._feature_generator_for_scenario(
+                        s=s, m=m, seed=self._seed
                     )
                     quadratic_target_generators = [
                         self.individual_target_generator(ii) for ii in range(m)
@@ -777,7 +899,10 @@ class LinearAndStepWithNoiseExperiment(Experiment):
         n: int,
         *,
         seed: Optional[int] = 17,
+        feature_distribution: str = "normal",
     ):
+        super().__init__(feature_distribution=feature_distribution)
+
         if isinstance(m_linear, int):
             m_linear = [m_linear]
         if isinstance(m_step, int):
@@ -803,12 +928,8 @@ class LinearAndStepWithNoiseExperiment(Experiment):
             for m_linear in self._m_linear:
                 for m_step in self._m_step:
                     for s in self._s:
-                        feature_generator = UniformFeatureGenerator(
-                            s=s,
-                            m=m_linear + m_step,
-                            low=0.0,
-                            high=100.0,
-                            seed=self._seed,
+                        feature_generator = self._feature_generator_for_scenario(
+                            s=s, m=m_linear + m_step, seed=self._seed
                         )
 
                         if m_linear > 0:
@@ -873,7 +994,10 @@ class KitchenSinkExperiment(Experiment):
         n: int,
         *,
         seed: int = 0x1734CE6F,
+        feature_distribution: str = "normal",
     ):
+        super().__init__(feature_distribution=feature_distribution)
+
         if isinstance(sigma, float):
             sigma = [sigma]
 
@@ -899,12 +1023,8 @@ class KitchenSinkExperiment(Experiment):
 
         for sigma in self._sigma:
 
-            feature_generator = UniformFeatureGenerator(
-                s=self._s,
-                m=self._m,
-                low=0.0,
-                high=100.0,
-                seed=self._seed,
+            feature_generator = self._feature_generator_for_scenario(
+                s=self._s, m=self._m, seed=self._seed
             )
 
             exact_target_generator = AdditiveExactTargetGenerator(
