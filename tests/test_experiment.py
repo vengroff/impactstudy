@@ -162,6 +162,74 @@ class UniformFeatureGeneratorTestCase(unittest.TestCase):
         self.assertTrue((df_c < 1.0).all().all())
 
 
+class CorrelatedFeatureGeneratorTestCase(unittest.TestCase):
+    def setUp(self):
+        mu = 50
+        sigma = 20
+        corr = 0.8
+
+        self.mu = mu
+        self.sigma = sigma
+        self.cov = np.array(
+            [
+                [sigma * sigma, sigma * sigma * corr],
+                [sigma * sigma * corr, sigma * sigma],
+            ]
+        )
+        self.s = 2
+
+        self.feature_generator = ise.CorrelatedFeatureGenerator(
+            self.cov, self.mu, self.s, self.sigma
+        )
+
+    def test_correlated_feature_generator(self):
+        df_x, df_c = self.feature_generator(100)
+
+        self.assertEqual((100, 2), df_x.shape)
+        self.assertEqual((100, self.s), df_c.shape)
+
+        corr = np.corrcoef(df_x["x_0"], df_x["x_1"])
+
+        self.assertAlmostEqual(1.0, corr[0][0], places=10)
+        self.assertAlmostEqual(1.0, corr[1][1], places=10)
+
+        self.assertTrue(0.78 < corr[0][1] < 0.8)
+        self.assertTrue(0.78 < corr[1][0] < 0.8)
+
+
+class ConcatenatedFeatureGeneratorTestCase(unittest.TestCase):
+    def setUp(self):
+        self.fg0 = ise.NormalFeatureGenerator(3, 1, 50.0, 10.0)
+        self.fg1 = ise.UniformFeatureGenerator(2, 7, low=0.0, high=100.0)
+
+        self.feature_generator = ise.ConcatenatedFeatureGenerator([self.fg0, self.fg1])
+
+    def test_concatenated_feature_generator(self):
+        df_x0, df_c0 = self.fg0(100)
+        df_x1, df_c1 = self.fg1(100)
+
+        self.assertEqual((100, 3), df_x0.shape)
+        self.assertEqual((100, 1), df_c0.shape)
+
+        self.assertEqual((100, 2), df_x1.shape)
+        self.assertEqual((100, 7), df_c1.shape)
+
+        df_x, df_c = self.feature_generator(100)
+
+        self.assertEqual((100, 5), df_x.shape)
+        self.assertEqual((100, 8), df_c.shape)
+
+        for ii in range(3):
+            self.assertTrue(df_x[f"x_{ii}"].equals(df_x0[f"x_{ii}"]))
+        for ii in range(2):
+            self.assertTrue(df_x[f"x_{ii + 3}"].equals(df_x1[f"x_{ii}"]))
+
+        for ii in range(1):
+            self.assertTrue(df_c[f"c_{ii}"].equals(df_c0[f"c_{ii}"]))
+        for ii in range(7):
+            self.assertTrue(df_c[f"c_{ii + 1}"].equals(df_c1[f"c_{ii}"]))
+
+
 class ScenarioGeneratorTestCase(unittest.TestCase):
 
     def setUp(self) -> None:

@@ -341,6 +341,69 @@ class NormalFeatureGenerator(FeatureGenerator):
         return df_x, df_c
 
 
+class CorrelatedFeatureGenerator(FeatureGenerator):
+    def __init__(
+        self,
+        cov: np.ndarray,
+        mu: float,
+        s: int,
+        sigma_c: float,
+        seed: int | RandomState = 17,
+    ):
+        super().__init__(m=cov.shape[0], s=s, seed=seed)
+        self._mu = mu
+        self._sigma_c = sigma_c
+        self._cov = cov
+
+    @cache
+    def __call__(self, n: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        x = self._rng.multivariate_normal(
+            mean=np.ones(self._cov.shape[0]) * self._mu, cov=self._cov, size=n
+        )
+
+        df_x = pd.DataFrame(x, columns=self.x_cols())
+
+        c = self._rng.normal(loc=self._mu, scale=self._sigma_c, size=(n, self._s))
+
+        df_c = pd.DataFrame(c, columns=self.c_cols())
+
+        return df_x, df_c
+
+
+class ConcatenatedFeatureGenerator(FeatureGenerator):
+    def __init__(self, feature_generators: Iterable[FeatureGenerator]):
+        self._feature_generators = list(feature_generators)
+
+    def __call__(self, n: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        sub_features = [f(n) for f in self._feature_generators]
+
+        x_offset, c_offset = 0, 0
+
+        new_features = []
+
+        for df_x, df_c in sub_features:
+            if x_offset > 0:
+                df_x = df_x.rename(
+                    lambda c: f"x_{int(c.split('_')[1]) + x_offset}",
+                    axis="columns",
+                )
+            x_offset += df_x.shape[1]
+
+            if c_offset > 0:
+                df_c = df_c.rename(
+                    lambda c: f"c_{int(c.split('_')[1]) + c_offset}",
+                    axis="columns",
+                )
+            c_offset += df_c.shape[1]
+
+            new_features.append((df_x, df_c))
+
+        return (
+            pd.concat([df_x for df_x, df_c in new_features], axis="columns"),
+            pd.concat([df_c for df_x, df_c in new_features], axis="columns"),
+        )
+
+
 class Scenario:
 
     def __init__(
