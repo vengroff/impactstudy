@@ -162,39 +162,157 @@ class UniformFeatureGeneratorTestCase(unittest.TestCase):
         self.assertTrue((df_c < 1.0).all().all())
 
 
-class CorrelatedFeatureGeneratorTestCase(unittest.TestCase):
+class UncorrelatedXCTestCase(unittest.TestCase):
     def setUp(self):
         mu = 50
         sigma = 20
-        corr = 0.8
+        corr_xx = 0.8
+        corr_cc = 0.2
 
         self.mu = mu
         self.sigma = sigma
         self.cov = np.array(
             [
-                [sigma * sigma, sigma * sigma * corr],
-                [sigma * sigma * corr, sigma * sigma],
+                [sigma * sigma, sigma * sigma * corr_xx, 0.0, 0.0],
+                [sigma * sigma * corr_xx, sigma * sigma, 0.0, 0.0],
+                [0.0, 0.0, sigma * sigma, sigma * sigma * corr_cc],
+                [0.0, 0.0, sigma * sigma * corr_cc, sigma * sigma],
             ]
         )
-        self.s = 2
+        self.m = 2
 
         self.feature_generator = ise.CorrelatedFeatureGenerator(
-            self.cov, self.mu, self.s, self.sigma
+            self.cov, self.mu, self.m
         )
 
-    def test_correlated_feature_generator(self):
+    def test_uncorrelated_xc(self):
         df_x, df_c = self.feature_generator(100)
 
         self.assertEqual((100, 2), df_x.shape)
-        self.assertEqual((100, self.s), df_c.shape)
+        self.assertEqual((100, 2), df_c.shape)
 
-        corr = np.corrcoef(df_x["x_0"], df_x["x_1"])
+        # Correlated X's.
+        corr_xx = np.corrcoef(df_x["x_0"], df_x["x_1"])
 
-        self.assertAlmostEqual(1.0, corr[0][0], places=10)
-        self.assertAlmostEqual(1.0, corr[1][1], places=10)
+        self.assertAlmostEqual(1.0, corr_xx[0][0], places=10)
+        self.assertAlmostEqual(1.0, corr_xx[1][1], places=10)
 
-        self.assertTrue(0.78 < corr[0][1] < 0.8)
-        self.assertTrue(0.78 < corr[1][0] < 0.8)
+        self.assertTrue(0.83 < corr_xx[0][1] < 0.84)
+        self.assertTrue(0.83 < corr_xx[1][0] < 0.84)
+
+        # Correlated CC
+        corr_cc = np.corrcoef(df_c["c_0"], df_c["c_1"])
+
+        self.assertAlmostEqual(1.0, corr_cc[0][0], places=10)
+        self.assertAlmostEqual(1.0, corr_cc[1][1], places=10)
+
+        self.assertTrue(0.34 < corr_cc[0][1] < 0.35)
+        self.assertTrue(0.34 < corr_cc[1][0] < 0.35)
+
+        # Uncorrelated XC
+        for x_col in ["x_0", "x_1"]:
+            for c_col in ["c_0", "c_1"]:
+                corr_xc = np.corrcoef(df_x[x_col], df_c[c_col])
+
+                self.assertAlmostEqual(1.0, corr_xc[0][0], places=10)
+                self.assertAlmostEqual(1.0, corr_xc[1][1], places=10)
+
+                self.assertTrue(-0.2 < corr_xc[0][1] < 0.2)
+                self.assertTrue(-0.2 < corr_xc[1][0] < 0.2)
+
+
+class CorrelatedXCTestCase(unittest.TestCase):
+    def setUp(self):
+        mu = 50
+        sigma = 20
+        corr = 0.7
+
+        sigma2 = sigma * sigma
+        sigma2_corr = sigma2 * corr
+
+        self.mu = mu
+        self.sigma = sigma
+        self.cov = np.array(
+            [
+                [sigma2, 0.0, 0.0, 0.0],
+                [0.0, sigma2, 0.0, 0.0],
+                [0.0, 0.0, sigma2, sigma2_corr],
+                [0.0, 0.0, sigma2_corr, sigma2],
+            ]
+        )
+        self.m = 3
+
+        self.feature_generator = ise.CorrelatedFeatureGenerator(
+            self.cov, self.mu, self.m
+        )
+
+    def test_correlated_xc(self):
+        df_x, df_c = self.feature_generator(100)
+
+        self.assertEqual((100, 3), df_x.shape)
+        self.assertEqual((100, 1), df_c.shape)
+
+        # Correlated X and C
+        corr_x2c0 = np.corrcoef(df_x["x_2"], df_c["c_0"])
+
+        self.assertAlmostEqual(1.0, corr_x2c0[0][0], places=10)
+        self.assertAlmostEqual(1.0, corr_x2c0[1][1], places=10)
+
+        self.assertTrue(0.65 < corr_x2c0[0][1] < 0.75)
+        self.assertTrue(0.65 < corr_x2c0[1][0] < 0.75)
+
+        # Uncorrelated X and C
+        for xcol in ["x_0", "x_1"]:
+            corr_xc0 = np.corrcoef(df_x[xcol], df_c["c_0"])
+
+            self.assertAlmostEqual(1.0, corr_xc0[0][0], places=10)
+            self.assertAlmostEqual(1.0, corr_xc0[1][1], places=10)
+
+            self.assertTrue(-0.15 < corr_xc0[0][1] < 0.15)
+            self.assertTrue(-0.15 < corr_xc0[1][0] < 0.15)
+
+        # Uncorrelated X
+        for col0 in ["x_0", "x_1", "x_2"]:
+            for col1 in ["x_0", "x_1", "x_2"]:
+                corr_xx = np.corrcoef(df_x[col0], df_x[col1])
+                self.assertAlmostEqual(1.0, corr_xx[0][0], places=10)
+                self.assertAlmostEqual(1.0, corr_xx[1][1], places=10)
+                if col0 == col1:
+                    self.assertAlmostEqual(1.0, corr_xx[0][1], places=10)
+                    self.assertAlmostEqual(1.0, corr_xx[1][0], places=10)
+                else:
+                    self.assertTrue(-0.15 < corr_xx[0][1] < 0.15)
+                    self.assertTrue(-0.15 < corr_xx[1][0] < 0.15)
+
+    def test_with_independence(self):
+        # Add some additional independent x_i and c_i
+        uniform_feature_generator = ise.UniformFeatureGenerator(
+            m=2, s=2, low=0.0, high=100.0, seed=99
+        )
+        feature_generator = ise.ConcatenatedFeatureGenerator(
+            [self.feature_generator, uniform_feature_generator]
+        )
+
+        df_x, df_c = feature_generator(100)
+
+        self.assertEqual((100, 5), df_x.shape)
+        self.assertEqual((100, 3), df_c.shape)
+
+        for col0 in ["x_0", "x_1", "x_2"]:
+            for col1 in ["x_3", "x_4"]:
+                corr_xx = np.corrcoef(df_x[col0], df_x[col1])
+                self.assertAlmostEqual(1.0, corr_xx[0][0], places=10)
+                self.assertAlmostEqual(1.0, corr_xx[1][1], places=10)
+                self.assertTrue(-0.1 < corr_xx[0][1] < 0.1)
+                self.assertTrue(-0.1 < corr_xx[1][0] < 0.1)
+
+        for col0 in ["c_0"]:
+            for col1 in ["c_1", "c_2"]:
+                corr_cc = np.corrcoef(df_c[col0], df_c[col1])
+                self.assertAlmostEqual(1.0, corr_cc[0][0], places=10)
+                self.assertAlmostEqual(1.0, corr_cc[1][1], places=10)
+                self.assertTrue(-0.1 < corr_cc[0][1] < 0.1)
+                self.assertTrue(-0.1 < corr_cc[1][0] < 0.1)
 
 
 class ConcatenatedFeatureGeneratorTestCase(unittest.TestCase):

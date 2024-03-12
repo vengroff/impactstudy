@@ -346,13 +346,11 @@ class CorrelatedFeatureGenerator(FeatureGenerator):
         self,
         cov: np.ndarray,
         mu: float,
-        s: int,
-        sigma_c: float,
+        m: int,
         seed: int | RandomState = 17,
     ):
-        super().__init__(m=cov.shape[0], s=s, seed=seed)
+        super().__init__(m=m, s=cov.shape[0] - m, seed=seed)
         self._mu = mu
-        self._sigma_c = sigma_c
         self._cov = cov
 
     @cache
@@ -361,11 +359,9 @@ class CorrelatedFeatureGenerator(FeatureGenerator):
             mean=np.ones(self._cov.shape[0]) * self._mu, cov=self._cov, size=n
         )
 
-        df_x = pd.DataFrame(x, columns=self.x_cols())
-
-        c = self._rng.normal(loc=self._mu, scale=self._sigma_c, size=(n, self._s))
-
-        df_c = pd.DataFrame(c, columns=self.c_cols())
+        # Split them up into X and C.
+        df_x = pd.DataFrame(x[:, : self._m], columns=self.x_cols())
+        df_c = pd.DataFrame(x[:, self._m :], columns=self.c_cols())
 
         return df_x, df_c
 
@@ -373,6 +369,8 @@ class CorrelatedFeatureGenerator(FeatureGenerator):
 class ConcatenatedFeatureGenerator(FeatureGenerator):
     def __init__(self, feature_generators: Iterable[FeatureGenerator]):
         self._feature_generators = list(feature_generators)
+        self._m = sum(fg._m for fg in feature_generators)
+        self._s = sum(fg._s for fg in feature_generators)
 
     def __call__(self, n: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
         sub_features = [f(n) for f in self._feature_generators]
@@ -684,7 +682,7 @@ class Scenario:
 class Experiment(ABC):
 
     def __init__(self, feature_distribution: str):
-        known_distributions = ["uniform", "normal"]
+        known_distributions = ["uniform", "normal", "correlated"]
 
         if feature_distribution not in known_distributions:
             raise ValueError(
@@ -700,12 +698,30 @@ class Experiment(ABC):
         raise NotImplementedError("Not implemented on abstract class.")
 
     def _feature_generator_for_scenario(
-        self, m: int, s: int, seed: int
+        self, m: int, s: int, seed: int, corr: float = 0.0, m2: int = 0, s2: int = 0
     ) -> FeatureGenerator:
         if self._feature_distribution == "uniform":
             return UniformFeatureGenerator(s=s, m=m, low=0.0, high=100.0, seed=seed)
         elif self._feature_distribution == "normal":
             return NormalFeatureGenerator(s=s, m=m, mu=50.0, sigma=20.0, seed=seed)
+        elif self._feature_distribution == "correlated":
+            sigma = 20.0
+            cov = np.zeros((m + s, m + s)) + corr * sigma * sigma
+            for ii in range(m + s):
+                cov[ii][ii] = sigma * sigma
+
+            correlated_feature_generator = CorrelatedFeatureGenerator(
+                cov=cov, m=m, mu=50.0, seed=seed
+            )
+            if m2 != 0 or s2 != 0:
+                normal_feature_generator = NormalFeatureGenerator(
+                    m=m2, s=s2, mu=50.0, sigma=sigma, seed=99 * seed
+                )
+                return ConcatenatedFeatureGenerator(
+                    [correlated_feature_generator, normal_feature_generator]
+                )
+            else:
+                return correlated_feature_generator
         else:
             raise ValueError(
                 f"Unknown feature distribution {self._feature_distribution}."
@@ -1045,6 +1061,89 @@ class LinearAndStepWithNoiseExperiment(Experiment):
                             "s": s,
                             "sigma": sigma,
                         }, scenario
+
+
+class CorrelatedLinearWithNoiseExperiment(Experiment):
+
+    def __init__(
+        self,
+        m: int | Iterable[int],
+        s: int | Iterable[int],
+        sigma: int | float | Iterable[float],
+        corr: float | Iterable[float],
+        n: int,
+        seed: Optional[int] = 17,
+        m2: int | Iterable[int] = 0,
+        s2: int | Iterable[int] = 0,
+    ):
+        super().__init__(feature_distribution="correlated")
+
+        if isinstance(m, int):
+            m = [m]
+        if isinstance(s, int):
+            s = [s]
+        if isinstance(sigma, (int, float)):
+            sigma = [sigma]
+        if isinstance(corr, float):
+            corr = [corr]
+        if isinstance(m2, int):
+            m2 = [m2]
+        if isinstance(s2, int):
+            s2 = [s2]
+
+        self._m = m
+        self._s = s
+
+        self._m2 = m2
+        self._s2 = s2
+
+        self._sigma = sigma
+
+        self._corr = corr
+
+        self._n = n
+
+        self._seed = seed
+
+    def scenarios(
+        self,
+    ) -> Generator[Tuple[Dict[str, int | float], Scenario], None, None]:
+        for sigma in self._sigma:
+            for m in self._m:
+                for s in self._s:
+                    for m2 in self._m2:
+                        for s2 in self._s2:
+                            for corr in self._corr:
+                                feature_generator = (
+                                    self._feature_generator_for_scenario(
+                                        s=s,
+                                        m=m,
+                                        seed=self._seed,
+                                        corr=corr,
+                                        m2=m2,
+                                        s2=s2,
+                                    )
+                                )
+                                linear_exact_target_generator = (
+                                    LinearExactTargetGenerator(
+                                        a=np.ones(m + m2), b=20.0
+                                    )
+                                )
+                                target_generator = add_normal_noise(
+                                    linear_exact_target_generator,
+                                    sigma,
+                                    seed=(17 * self._seed) % 0x7FFFFFFF,
+                                )
+
+                                scenario = Scenario(
+                                    feature_generator, target_generator, self._n
+                                )
+                                yield {
+                                    "m": m,
+                                    "s": s,
+                                    "sigma": sigma,
+                                    "corr": corr,
+                                }, scenario
 
 
 class KitchenSinkExperiment(Experiment):
