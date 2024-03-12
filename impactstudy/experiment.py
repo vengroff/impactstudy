@@ -361,7 +361,7 @@ class CorrelatedFeatureGenerator(FeatureGenerator):
 
         # Split them up into X and C.
         df_x = pd.DataFrame(x[:, : self._m], columns=self.x_cols())
-        df_c = pd.DataFrame(x[:, self._m:], columns=self.c_cols())
+        df_c = pd.DataFrame(x[:, self._m :], columns=self.c_cols())  # noqa: E302
 
         return df_x, df_c
 
