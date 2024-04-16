@@ -410,12 +410,16 @@ class Scenario:
         target_generator: TargetGenerator,
         n: int,
         *,
+        ensemble_size: int = 50,
+        training_fraction: float = 0.8,
         impact_model_seed: int = 0x17E3FB61,
     ):
         self._feature_generator = feature_generator
         self._target_generator = target_generator
         self._impact_model_seed = impact_model_seed
         self._n = n
+        self._ensemble_size = ensemble_size
+        self._training_fraction = training_fraction
 
     def x_cols(self) -> List[str]:
         return self._feature_generator.x_cols()
@@ -461,7 +465,11 @@ class Scenario:
         df_X_prime = df[self.x_prime_cols()]
         y = df[self.y_col()]
 
-        impact_model = XGBoostImpactModel(random_state=self._impact_model_seed)
+        impact_model = XGBoostImpactModel(
+            ensemble_size=self._ensemble_size,
+            training_fraction=self._training_fraction,
+            random_state=self._impact_model_seed,
+        )
         impact_model.fit(df_X_prime, y)
 
         return impact_model
